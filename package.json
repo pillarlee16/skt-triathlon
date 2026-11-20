@@ -1,0 +1,25 @@
+{
+  "name": "skt-triathlon-draw",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "vite --configLoader native",
+    "build": "vite build --configLoader native",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.6.1",
+    "read-excel-file": "^9.3.16",
+    "three": "^0.183.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/three": "^0.183",
+    "typescript": "^5.9",
+    "vite": "^7.3"
+  }
+}

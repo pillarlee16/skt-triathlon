@@ -1,0 +1,17 @@
+{
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/display",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/start",
+      "destination": "/index.html"
+    }
+  ]
+}
