@@ -23,7 +23,13 @@ export function admin(app:HTMLElement) {
       state=await api('state')
       message='저장되었습니다.'
       return true
-    } catch(error) {message=(error as Error).message;return false}
+    } catch(error) {
+      message=(error as Error).message
+      if(error instanceof ApiError && error.status===409){
+        try {state=await api('state')} catch { /* The next poll retries the refresh. */ }
+      }
+      return false
+    }
     finally {busy=false;render()}
   }
   function render() {

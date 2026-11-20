@@ -17,12 +17,22 @@ const fileMemory=new Map<string,{bytes:ArrayBuffer; mime:string}>()
 class Conflict extends Error {}
 class Unauthorized extends Error {}
 
-async function read(mode:Mode):Promise<{state:State;etag?:string}> {
-  if (local) return {state:memory.get(mode)??initial(mode)}
+async function read(mode:Mode):Promise<State> {
+  if (local) return memory.get(mode)??initial(mode)
   const {get}=await import('@vercel/blob')
   const blob=await get(root(mode)+'state.json',{access:'private',useCache:false})
-  if (blob?.statusCode===200) return {state:await new Response(blob.stream).json() as State,etag:blob.blob.etag}
-  return {state:initial(mode)}
+  return blob?.statusCode===200 ? await new Response(blob.stream).json() as State : initial(mode)
+}
+async function stateWriteTag(mode:Mode) {
+  const {head,BlobNotFoundError}=await import('@vercel/blob')
+  try {
+    const {etag}=await head(root(mode)+'state.json')
+    if(!etag) throw new Error('Blob state metadata is missing an ETag')
+    return etag
+  } catch(error) {
+    if(error instanceof BlobNotFoundError) return undefined
+    throw error
+  }
 }
 async function write(state:State,etag?:string) {
   if (local) {
@@ -36,7 +46,9 @@ async function write(state:State,etag?:string) {
       access:'private',contentType:'application/json',allowOverwrite:!!etag,...(etag?{ifMatch:etag}:{})
     })
   } catch(error) {
-    if (error instanceof BlobPreconditionFailedError || (!etag && (await read(state.mode)).etag)) throw new Conflict()
+    if (error instanceof BlobPreconditionFailedError || (!etag && (await read(state.mode)).revision>0)) {
+      throw new Conflict('blob-write')
+    }
     throw error
   }
 }
@@ -87,7 +99,11 @@ export default {async fetch(request:Request):Promise<Response> {
     }
     if (!admin && op!=='tablet' && op!=='tabletStart') throw new Unauthorized()
     if (op==='tabletStart' && request.method!=='POST') return json({error:'지원하지 않는 요청입니다.'},405)
-    const {state,etag}=await read(mode)
+    const willWrite=request.method==='POST' && ['upload','action','tabletStart'].includes(op)
+    // Take the storage metadata version before reading the latest body.
+    // A concurrent overwrite makes this version fail the conditional write.
+    const etag=willWrite && !local ? await stateWriteTag(mode) : undefined
+    const state=await read(mode)
     if(op==='tablet' && request.method==='GET') return json({enabled:tabletAllowed(state,request,now)})
     if(op==='state' && request.method==='GET') return json(projection(state,now,url.searchParams.get('view')==='display'))
     if(op==='csv' && request.method==='GET') return new Response(csv(state,now),{headers:{
@@ -112,7 +128,8 @@ export default {async fetch(request:Request):Promise<Response> {
     }
     const key=op==='tabletStart'?sha((request.headers.get('authorization')??'')+id).toString('hex'):id
     if(Object.hasOwn(state.requests,key)) return json({ok:true})
-    if(op!=='tabletStart' && request.headers.get('x-revision')!==String(state.revision)) throw new Conflict()
+    if(op!=='tabletStart' && request.headers.get('x-revision')!==String(state.revision)) throw new Conflict('client-revision')
+    if(!local && !etag && state.revision>0) throw new Conflict('blob-created-during-read')
     let action:Action
     let token:string|undefined
     let upload:{asset:Asset;bytes:ArrayBuffer;mime:string}|undefined
@@ -152,7 +169,10 @@ export default {async fetch(request:Request):Promise<Response> {
   } catch(error) {
     if(error instanceof Unauthorized) return json({error:'로그인 또는 유효한 시작 링크가 필요합니다.'},401)
     if(error instanceof RuleError || error instanceof SyntaxError) return json({error:error.message},400)
-    if(error instanceof Conflict) return json({error:'다른 화면에서 상태가 변경되었습니다. 새 상태를 확인하세요.'},409)
+    if(error instanceof Conflict) {
+      console.info('event state conflict',op,error.message || 'local-write')
+      return json({error:'다른 화면에서 상태가 변경되었습니다. 새 상태를 확인하세요.'},409)
+    }
     console.error('event request failed',error instanceof Error?error.name:'UnknownError')
     return json({error:'저장소 연결을 확인하고 다시 시도하세요.'},503)
   }

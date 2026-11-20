@@ -17,6 +17,7 @@ test('authenticated rehearsal accepts only one competing START and retries the s
   const cookie=login.headers.get('set-cookie')!.split(';')[0]
   const command=(type:string,revision:number,fields={})=>post('action',{type,...fields},{cookie,'x-revision':String(revision),'x-request-id':randomUUID()})
   assert.equal((await command('prepare',0,{sport:'swimming'})).status,200)
+  assert.equal((await command('start',0)).status,409)
   const pair=await (await command('arm',1)).json()
   const authorization='Bearer '+pair.token
   const id=randomUUID()
@@ -30,6 +31,10 @@ test('authenticated rehearsal accepts only one competing START and retries the s
   const before=await (await state(cookie)).json()
   assert.equal(before.races.length,1)
   assert.deepEqual(before.races[0].winners,[])
+  const displayRequest=new Request(url('state')+'&view=display',{headers:{cookie}})
+  const display=await (await eventApi.fetch(displayRequest)).json()
+  assert.equal(display.current,before.current)
+  assert.equal(display.races[0].winners.length,3)
   assert.equal((await command('emergency',3)).status,200)
   const after=await (await state(cookie)).json()
   assert.equal(after.races.length,1)
