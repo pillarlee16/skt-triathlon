@@ -20,6 +20,7 @@
 - `npm test` 6개 통과. 추첨 대상 90→87→84명, 중복 방지, 결승 순서, 재추첨 이력, 비상 발표, 관리자·태블릿 동시 START와 재시도, Excel 입력 검증을 포함합니다.
 - Node.js 24의 `--experimental-transform-types --check`로 앱과 설정의 TypeScript 구문을 확인했습니다. Excel 템플릿 두 시트를 렌더링하고 저장 파일에서 90명 및 3개 상품 레코드를 확인했습니다.
 - 의존성과 npm 잠금 파일이 준비됐습니다. `npm run typecheck`와 `npm run build`가 통과했습니다. 브라우저 검증은 남았습니다.
+- Vercel 첫 배포에서 함수의 컴파일된 JavaScript가 `src/engine.ts`를 참조해 실행에 실패했습니다. 서버 모듈 참조를 `.js`로 바꾸고, 자동 테스트가 컴파일된 JavaScript를 실행하도록 변경했습니다.
 - Vercel 프로젝트 연결 정보와 현장 기기가 이 작업 환경에 없어 Preview와 본행사 수용 검증이 남았습니다.
 
 ## 다음 작업

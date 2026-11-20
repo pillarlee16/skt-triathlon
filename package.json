@@ -9,7 +9,7 @@
     "dev": "vite --configLoader native",
     "build": "vite build --configLoader native",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "tsc --noEmit false --outDir .local/test-build && node --test .local/test-build/tests/*.test.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.6.1",

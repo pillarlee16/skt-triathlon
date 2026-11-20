@@ -1,6 +1,6 @@
 import {createHash, createHmac, randomBytes, randomUUID, timingSafeEqual} from 'node:crypto'
-import {apply, RuleError} from '../src/engine.ts'
-import {csv, currentRace, initial, stage, type Action, type Asset, type Mode, type State} from '../src/model.ts'
+import {apply, RuleError} from '../src/engine.js'
+import {csv, currentRace, initial, stage, type Action, type Asset, type Mode, type State} from '../src/model.js'
 
 const local = !process.env.VERCEL && !process.env.BLOB_READ_WRITE_TOKEN
 const memory = new Map<Mode,State>()

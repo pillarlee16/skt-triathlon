@@ -1,5 +1,5 @@
 import {randomInt, randomUUID} from 'node:crypto'
-import {currentRace, findAsset, initial, sports, audioSlots, type Action, type State, type Race, type Sport} from './model.ts'
+import {currentRace, findAsset, initial, sports, audioSlots, type Action, type State, type Race, type Sport} from './model.js'
 
 export class RuleError extends Error {}
 const requireRule: (ok:unknown, message:string)=>asserts ok = (ok,message)=>{
