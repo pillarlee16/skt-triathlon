@@ -1,11 +1,11 @@
 import './style.css'
-import {api, mode, mutate, poll} from './client.ts'
+import {api, legacyMode, mutate, poll} from './client.ts'
 const app=document.querySelector<HTMLElement>('#app')!
 const path=location.pathname.replace(/\/$/,'')
 if(path==='/admin')void import('./admin.ts').then(({admin})=>admin(app))
 else if(path==='/display')void import('./display.ts').then(({display})=>display(app))
 else if(path==='/start'){
-  const key='skt-start-'+mode
+  const key='skt-start'+(legacyMode===null?'':'-'+legacyMode)
   const fragment=location.hash.slice(1)
   if(fragment){sessionStorage.setItem(key,fragment);history.replaceState(null,'',location.pathname+location.search)}
   const token=sessionStorage.getItem(key)??''
@@ -22,5 +22,5 @@ else if(path==='/start'){
     finally{busy=false}
   }
 }else{
-  app.innerHTML='<section class="landing"><div class="eyebrow">SKT · 2026 송년회</div><h1>철인3종<br><em>럭키드로우</em></h1><p>수영 · 사이클 · 달리기</p><div class="actions"><a href="/admin?mode=rehearsal" class="button primary">리허설 운영</a><a href="/admin?mode=live" class="button">본행사 운영</a></div></section>'
+  app.innerHTML='<section class="landing"><div class="eyebrow">SKT · 2026 송년회</div><h1>철인3종<br><em>럭키드로우</em></h1><p>수영 · 사이클 · 달리기</p><div class="actions"><a href="/admin" class="button primary">관리자 열기</a></div></section>'
 }

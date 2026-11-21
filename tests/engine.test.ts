@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {apply} from '../src/engine.ts'
-import {initial,sports,csv,currentRace,stage,podiumReadyAt,podiumRevealed,podiumIntervalMs,type State,type Sport} from '../src/model.ts'
-import {position,trackOrder} from '../src/playback.ts'
-import {parseRows} from '../src/import.ts'
+import {initial,sports,csv,currentRace,stage,findAsset,podiumReadyAt,podiumRevealed,podiumIntervalMs,type State,type Sport} from '../src/model.ts'
+import {cuePoints,position,raceBeats,trackOrder} from '../src/playback.ts'
+import {fixture} from './fixture.ts'
 const base=100000
 function finish(s:State,sport:Sport,now:number) {
   const ready=s.ready?s:apply(s,{type:'prepare',sport},now)
@@ -11,7 +11,7 @@ function finish(s:State,sport:Sport,now:number) {
   return apply(result,{type:'next'},podiumReadyAt(currentRace(result)!))
 }
 test('90, 87, 84 eligible, nine unique winners, official CSV',()=>{
-  let s=initial('rehearsal')
+  let s=fixture()
   for(const [i,sport] of sports.entries()) {
     if(!s.ready)s=apply(s,{type:'prepare',sport},base+i*50000)
     assert.equal(s.ready?.sport,sport)
@@ -37,7 +37,7 @@ test('90, 87, 84 eligible, nine unique winners, official CSV',()=>{
   assert.equal(stage(s,base+150000),'complete')
 })
 test('earlier redraw atomically invalidates later results and recovers ready',()=>{
-  let s=initial('rehearsal')
+  let s=fixture()
   sports.forEach((sport,i)=>{s=finish(s,sport,base+i*9000)})
   s=apply(s,{type:'redraw',sport:'cycling',reason:'운영 정정'},base+30000)
   s=JSON.parse(JSON.stringify(s))
@@ -49,7 +49,7 @@ test('earlier redraw atomically invalidates later results and recovers ready',()
   assert.equal(currentRace(s)?.redrawId,s.races[1].invalidated?.redrawId)
 })
 test('double start rejects and emergency retains committed winners',()=>{
-  const ready=apply(initial('rehearsal'),{type:'prepare',sport:'swimming'},base)
+  const ready=apply(fixture(),{type:'prepare',sport:'swimming'},base)
   const running=apply(ready,{type:'start'},base,()=>0)
   assert.throws(()=>apply(running,{type:'start'},base))
   assert.equal(csv(running,base).split('\r\n').length,1)
@@ -58,7 +58,7 @@ test('double start rejects and emergency retains committed winners',()=>{
   assert.equal(stage(podium,base+1),'podium')
 })
 test('exactly the expected runners cross before the end',()=>{
-  const setup=apply(initial('rehearsal'),{type:'prepare',sport:'swimming'},base)
+  const setup=apply(fixture(),{type:'prepare',sport:'swimming'},base)
   const started=apply(setup,{type:'start'},base)
   const race=currentRace(started)!
   const sorted=trackOrder(started.people,race)
@@ -66,7 +66,7 @@ test('exactly the expected runners cross before the end',()=>{
   assert.deepEqual(sorted.filter(r=>position(r,.98)>=1).map(r=>r.person.id),race.winners.slice(0,2).map(w=>w.id))
 })
 test('race animation seeds alter intermediate standings without changing draw or finish',()=>{
-  const ready=apply(initial('rehearsal'),{type:'prepare',sport:'swimming'},base)
+  const ready=apply(fixture(),{type:'prepare',sport:'swimming'},base)
   const first=apply(ready,{type:'start'},base,max=>max===2**31?42:Math.floor(max/3))
   const second=apply(ready,{type:'start'},base,max=>max===2**31?987654:Math.floor(max/3))
   const races=[currentRace(first)!,currentRace(second)!]
@@ -77,11 +77,61 @@ test('race animation seeds alter intermediate standings without changing draw or
   assert.notDeepEqual(top(standings[0],.52),top(standings[1],.52))
   for(const runners of standings)assert.deepEqual(runners.filter(r=>position(r,1)>=1).map(r=>r.person.id),races[0].winners.map(w=>w.id))
 })
-test('workbook preview identifies duplicate participant and missing prizes',()=>{
-  const result=parseRows([
-    ['참가번호','이름','조직','사진 파일명','참가 여부'],
-    ['01','한','A','','참가'],['01','두','A','','참가']
-  ],[['종목','상품명','이미지 파일명'],['수영','상품','']])
-  assert.ok(result.errors.some(e=>e.includes('3행 중복')))
-  assert.ok(result.errors.some(e=>e.includes('사이클')))
+test('direct preparation uses stable IDs and rejects edits after drawing',()=>{
+  let state=initial('rehearsal')
+  assert.throws(()=>apply(state,{type:'prepare',sport:'swimming'},base))
+  for(let i=0;i<9;i++)state=apply(state,{type:'savePerson',name:'테스트'},base)
+  assert.equal(new Set(state.people.map(p=>p.id)).size,9)
+  assert.throws(()=>apply(state,{type:'prepare',sport:'swimming'},base))
+  state=apply(state,{type:'prizeNames',names:{swimming:'A',cycling:'B',running:'C'}},base)
+  state=apply(state,{type:'prepare',sport:'swimming'},base)
+  const id=state.people[0].id
+  state=apply(state,{type:'assets',assets:[{id:'original',name:'portrait.png',kind:'image'}]},base)
+  state=apply(state,{type:'assets',assets:[{id:'direct',name:'portrait.png',kind:'image'}],target:{person:id}},base)
+  assert.equal(state.ready,undefined)
+  assert.equal(findAsset(state,'portrait.png')?.id,'original')
+  assert.equal(findAsset(state,state.people[0].photo)?.id,'direct')
+  state=apply(state,{type:'prepare',sport:'swimming'},base)
+  state=apply(state,{type:'savePerson',id,name:'새 이름'},base)
+  assert.equal(state.ready,undefined)
+  assert.equal(state.people[0].id,id)
+  state=apply(state,{type:'prepare',sport:'swimming'},base)
+  state=apply(state,{type:'start'},base)
+  assert.throws(()=>apply(state,{type:'removePerson',id},base))
+  assert.throws(()=>apply(state,{type:'prizeNames',names:{swimming:'A',cycling:'B',running:'C'}},base))
+})
+
+test('three course stories change leaders and keep a deterministic photo finish',()=>{
+  for(const sport of sports)for(const duration of [15,40,120])for(const seed of [0,17,42,91827,2147483647]){
+    let state=fixture()
+    const config=structuredClone(state.config)
+    config.duration[sport]=duration
+    state=apply(state,{type:'config',config},base)
+    for(const prior of sports.slice(0,sports.indexOf(sport))) state=finish(state,prior,base-30000)
+    const ready=state.ready?state:apply(state,{type:'prepare',sport},base)
+    const race=currentRace(apply(ready,{type:'start'},base,max=>max===2**31?seed:Math.floor(max/3)))!
+    const runners=trackOrder(state.people,race)
+    assert.equal(race.endsAt-race.startsAt,duration*1000)
+    const leaders=[.17,.35,.58,.79].map(t=>runners.reduce((a,b)=>position(a,t)>position(b,t)?a:b).person.id)
+    assert.equal(new Set(leaders).size,4)
+    const cues=cuePoints(sport,runners)
+    assert.deepEqual(cues,cuePoints(sport,trackOrder(state.people,structuredClone(race))))
+    for(const [i,cue] of cues.entries()){
+      const beat=raceBeats[sport][i]
+      assert.ok(cue.at>=beat.start&&cue.at<beat.end)
+      assert.ok(Math.abs(position(cue.runner,cue.at)-beat.gate)<.001)
+    }
+    for(const runner of runners){
+      let previous=0
+      for(let frame=0;frame<=duration*30;frame++){
+        const distance=position(runner,frame/(duration*30))
+        assert.ok(Number.isFinite(distance)&&distance>=previous)
+        previous=distance
+      }
+    }
+    for(const [i,t] of [.959,.98,1].entries()){
+      assert.deepEqual(runners.filter(r=>position(r,t)>=1).map(r=>r.person.id),
+        race.winners.slice(0,i+1).map(w=>w.id))
+    }
+  }
 })

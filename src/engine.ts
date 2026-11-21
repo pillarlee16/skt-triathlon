@@ -1,5 +1,5 @@
 import {randomInt, randomUUID} from 'node:crypto'
-import {currentRace, findAsset, initial, sports, audioSlots, countdownMs, startLeadMs, podiumLeadMs, podiumReadyAt, type Action, type State, type Race, type Sport} from './model.js'
+import {currentRace, findAsset, preparationLocked, sports, audioSlots, countdownMs, startLeadMs, podiumLeadMs, podiumReadyAt, type Action, type State, type Race, type Sport} from './model.js'
 
 export class RuleError extends Error {}
 const requireRule: (ok:unknown, message:string)=>asserts ok = (ok,message)=>{
@@ -52,7 +52,7 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       if (emergency) attempt.podiumAt=now+podiumLeadMs
       s.races.push(attempt)
       s.current=attempt.id
-      s.locked=s.mode==='live'
+      s.locked=true
       delete s.ready
       delete s.pairing
       break
@@ -82,37 +82,62 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       s.ready={id:randomUUID(),sport:action.sport,redrawId}
       break
     }
-    case 'reset':
-      requireRule(s.mode==='rehearsal','리허설만 초기화할 수 있습니다.')
-      return {...initial('rehearsal'),revision:s.revision,requests:s.requests}
-    case 'import':
-      requireRule(!s.locked && !s.races.length,'첫 추첨 이후에는 명단과 상품을 바꿀 수 없습니다.')
-      requireRule(Array.isArray(action.people) && action.people.length<=180 && action.prizes,'명단 형식이 올바르지 않습니다.')
-      requireRule(action.people.every(p=>p && nonempty(p.id,30) && nonempty(p.name,80) && validText(p.team,100) &&
-        validText(p.photo,200) && typeof p.active==='boolean' && (p.color===undefined || /^#[0-9a-f]{6}$/i.test(p.color))), '참가자 필드를 확인하세요.')
-      requireRule(new Set(action.people.map(p=>p.id)).size===action.people.length,'참가번호가 중복됩니다.')
-      requireRule(sports.every(k=>nonempty(action.prizes[k]?.name,100) && validText(action.prizes[k]?.image,200)),'세 종목 상품을 모두 등록하세요.')
-      s.people=action.people
-      s.prizes=action.prizes
+    case 'savePerson':
+    case 'removePerson':
+    case 'prizeNames': {
+      requireRule(!preparationLocked(s),'첫 추첨 이후에는 준비 정보를 바꿀 수 없습니다.')
+      if(action.type==='prizeNames'){
+        requireRule(sports.every(k=>validText(action.names?.[k],100)),'상품명은 100자 이하로 입력하세요.')
+        for(const sport of sports)s.prizes[sport].name=action.names[sport].trim()
+      }else if(action.type==='savePerson'&&action.id===undefined){
+        requireRule(nonempty(action.name,80)&&s.people.length<180,'이름은 80자 이하, 참가자는 최대 180명까지 등록할 수 있습니다.')
+        s.people.push({id:randomUUID(),name:action.name.trim(),team:'',photo:'',active:true})
+      }else{
+        const index=s.people.findIndex(p=>p.id===action.id)
+        requireRule(index>=0,'참가자를 찾을 수 없습니다.')
+        if(action.type==='removePerson')s.people.splice(index,1)
+        else{
+          requireRule(nonempty(action.name,80),'이름을 80자 이하로 입력하세요.')
+          s.people[index].name=action.name.trim()
+        }
+      }
       delete s.ready
       delete s.pairing
       break
+    }
     case 'config': {
       const c=action.config
       requireRule(c && nonempty(c.title,100) && validText(c.logo,200) && validText(c.starter,200) &&
+        [c.podiumBackdrop,c.stadiumAd].every(ref=>ref===undefined || validText(ref,200)) &&
         sports.every(k=>nonempty(c.names?.[k],50) && validText(c.captions?.[k],150) &&
         Number.isInteger(c.duration?.[k]) && c.duration[k]>=15 && c.duration[k]<=120) &&
         c.audio && audioSlots.every(k=>c.audio[k]===undefined || validText(c.audio[k],200)), '방송 설정을 확인하세요. 경기 시간은 15~120초입니다.')
-      requireRule(!race,'경기 진행 중에는 음량만 변경할 수 있습니다.')
+      requireRule(!preparationLocked(s),'첫 추첨 이후에는 음량만 변경할 수 있습니다.')
       s.config=c
       break
     }
-    case 'assets':
-      requireRule(!race,'경기 진행 중에는 에셋을 변경할 수 없습니다.')
-      s.assets.push(...action.assets)
+    case 'assets': {
+      requireRule(!preparationLocked(s),'첫 추첨 이후에는 파일을 변경할 수 없습니다.')
+      if(action.target){
+        const [asset]=action.assets
+        requireRule(action.assets.length===1&&asset.kind==='image','이미지 파일을 선택하세요.')
+        if('person' in action.target){
+          const id=action.target.person
+          const person=s.people.find(p=>p.id===id)
+          requireRule(person,'참가자를 찾을 수 없습니다.')
+          person.photo=asset.id
+        }else{
+          requireRule(validSport(action.target.prize),'종목이 올바르지 않습니다.')
+          s.prizes[action.target.prize].image=asset.id
+        }
+        delete s.ready
+        delete s.pairing
+        s.assets.push({...asset,targeted:true})
+      }else s.assets.push(...action.assets)
       break
+    }
     case 'removeAsset':
-      requireRule(!race && !s.locked,'본행사 시작 후에는 에셋을 해제할 수 없습니다.')
+      requireRule(!preparationLocked(s),'본행사 시작 후에는 에셋을 해제할 수 없습니다.')
       s.assets=s.assets.filter(a=>a.id!==action.id)
       break
     case 'volume':

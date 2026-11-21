@@ -1,6 +1,6 @@
 import {createHash, createHmac, randomBytes, randomUUID, timingSafeEqual} from 'node:crypto'
 import {apply, RuleError} from '../src/engine.js'
-import {csv, currentRace, initial, stage, type Action, type Asset, type Mode, type State} from '../src/model.js'
+import {csv, currentRace, initial, stage, sports, type Sport, type Action, type Asset, type Mode, type State} from '../src/model.js'
 
 const local = !process.env.VERCEL && !process.env.BLOB_READ_WRITE_TOKEN
 const memory = new Map<Mode,State>()
@@ -63,7 +63,7 @@ function tabletAllowed(s:State, request:Request, now:number) {
     token && safeEqual(sha(token).toString('hex'),s.pairing.hash))
 }
 function projection(s:State, now:number, display:boolean) {
-  const {pairing, requests, ...publicState}=s
+  const {pairing, requests, mode, ...publicState}=s
   const race=currentRace(s)
   return {...publicState,now,tabletArmed:!!(pairing && pairing.expires>now),
     races: s.races.map(r=>display && r.id===race?.id || now>=r.endsAt || r.invalidated ? r : {...r,winners:[]})}
@@ -80,12 +80,12 @@ function imageType(bytes:Uint8Array) {
 export default {async fetch(request:Request):Promise<Response> {
   const url=new URL(request.url)
   const op=url.searchParams.get('op')??'state'
-  const rawMode=url.searchParams.get('mode')??'rehearsal'
-  if (rawMode!=='live' && rawMode!=='rehearsal') return json({error:'운영 모드가 올바르지 않습니다.'},400)
-  const mode:Mode=rawMode
+  const mode:Mode=process.env.VERCEL&&process.env.VERCEL_ENV==='production'?'live':'rehearsal'
+  const legacyMode=url.searchParams.get('mode')
+  if (legacyMode!==null&&legacyMode!==mode) return json({error:'이 링크는 현재 배포 환경에서 사용할 수 없습니다.'},403)
   const now=Date.now()
-  if (mode==='live' && (!process.env.VERCEL || process.env.VERCEL_ENV!=='production' || process.env.APP_LIVE_ENABLED!=='true')) {
-    return json({error:'이 환경에서 본행사를 사용할 수 없습니다.'},403)
+  if (mode==='live' && process.env.APP_LIVE_ENABLED!=='true') {
+    return json({error:'운영 배포가 활성화되지 않았습니다.'},403)
   }
   if (!password() || (!local && secret().length<32)) return json({error:'운영 환경의 인증 설정을 확인하세요.'},503)
   const admin=isAdmin(request)
@@ -107,7 +107,7 @@ export default {async fetch(request:Request):Promise<Response> {
     if(op==='tablet' && request.method==='GET') return json({enabled:tabletAllowed(state,request,now)})
     if(op==='state' && request.method==='GET') return json(projection(state,Date.now(),url.searchParams.get('view')==='display'))
     if(op==='csv' && request.method==='GET') return new Response(csv(state,now),{headers:{
-      ...headers,'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="'+mode+'-results.csv"'
+      ...headers,'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="triathlon-results.csv"'
     }})
     if(op==='file' && request.method==='GET') {
       const asset=state.assets.find(a=>a.id===url.searchParams.get('id'))
@@ -142,7 +142,10 @@ export default {async fetch(request:Request):Promise<Response> {
       if(!mime) return json({error:'JPG, PNG, WebP, MP3, WAV, OGG를 지원합니다.'},415)
       const asset:Asset={id:randomUUID(),name,kind:mime.startsWith('image/')?'image':'audio'}
       upload={asset,bytes,mime}
-      action={type:'assets',assets:[asset]}
+      const person=url.searchParams.get('person')
+      const prize=url.searchParams.get('prize') as Sport|null
+      if((person!==null&&(!person||prize!==null))||(prize!==null&&!sports.includes(prize)))throw new RuleError('파일을 연결할 항목을 확인하세요.')
+      action={type:'assets',assets:[asset],target:person?{person}:prize?{prize}:undefined}
     } else if(op==='tabletStart') action={type:'start'}
     else {
       action=await request.json()

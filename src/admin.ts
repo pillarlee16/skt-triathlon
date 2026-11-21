@@ -1,30 +1,46 @@
-import {api, ApiError, assetUrl, endpoint, esc, link, loginPanel, mode, mutate, mutation, operatorChannel, personPhoto, poll, type TvStatus, type ViewState} from './client.ts'
-import {audioSlots, currentRace, labels, podiumReadyAt, sports, stage, type Action, type Config, type Sport} from './model.ts'
-import {parseWorkbook} from './import.ts'
+import {api, ApiError, assetUrl, endpoint, esc, loginPanel, mutate, mutation, operatorChannel, personPhoto, poll, type TvStatus, type ViewState} from './client.ts'
+import {audioSlots, canPrepare, preparationLocked, currentRace, labels, podiumReadyAt, sports, stage, type Action, type Config, type Sport} from './model.ts'
 
-const phase={setup:'설정',ready:'출발 대기',countdown:'카운트다운',racing:'경주 중',finish:'결승',podium:'시상',complete:'행사 완료'}
+const phase={setup:'준비 중',ready:'출발 대기',countdown:'출발 카운트다운',racing:'경주 중',finish:'경주 종료',podium:'시상',complete:'행사 완료'}
 const audioNames=['오프닝','카운트다운','출발','BGM','부스터','충돌','추월','결승','시상']
+const prepStatus=(s:ViewState,unsaved:boolean)=>{
+  if(unsaved)return '변경한 이름과 상품명을 먼저 저장하세요.'
+  const people=s.people.filter(p=>p.active).length
+  if(people<9)return '참가자를 '+(9-people)+'명 더 등록하세요.'
+  if(!canPrepare(s))return '아래에서 세 종목 상품명을 저장하세요.'
+  return '준비가 끝났습니다. 경기 운영으로 이동할 수 있습니다.'
+}
 export function admin(app:HTMLElement) {
   let state:ViewState
-  let screen='control'
+  let screen:'prepare'|'operate'|undefined
+  let editingPerson:string|undefined
+  const drafts=new Map<string,string>()
+  const expanded=new Set<string>()
+  let rosterScroll=0
   let busy=false
   let message=''
   let pair=''
   let retry:(()=>Promise<boolean>)|undefined
   let connected=true
   const televisions=new Map<string,TvStatus & {received:number}>()
-  let draft:Awaited<ReturnType<typeof parseWorkbook>>|undefined
   let stop=()=>{}
-  const tell=(value:string)=>{message=value;const el=app.querySelector('#message');if(el)el.textContent=value}
+  const tell=(value:string)=>{
+    message=value
+    const el=app.querySelector('#message')
+    if(el){el.textContent=value;el.parentElement!.hidden=!value}
+  }
   function tvStatus() {
     for(const [id,tv] of televisions)if(Date.now()-tv.received>4500)televisions.delete(id)
     const label=app.querySelector('#tv-status')
     if(!label)return
     const reports=[...televisions.values()]
-    label.textContent=reports.length?reports.map(tv=>
-      (tv.online?(tv.revision>=state.revision?'연결됨':'변경 반영 대기'):'서버 재연결 중')+' · '+
-      (tv.graphics==='3d'?'3D':tv.graphics==='html'?'HTML 대체 송출'+(tv.graphicsIssue?' ('+tv.graphicsIssue+')':''):'3D 준비 중')+' · '+
-      (tv.audio?'음향 준비 완료':'TV에서 음향 켜기')).join(' / '):'같은 브라우저의 TV 연결 대기'
+    const tv=reports.find(t=>t.online&&t.revision>=state.revision)??reports[0]
+    label.textContent=!tv?'연결 대기 · TV 송출 열기를 누르세요.':
+      !tv.online?'재연결 중 · TV 창을 확인하세요.':
+      tv.revision<state.revision?'새 화면을 TV에 반영 중입니다.':
+      (tv.graphics==='3d'?'연결됨':tv.graphics==='html'?'대체 화면 연결됨'+(tv.graphicsIssue?' ('+tv.graphicsIssue+')':''):'연결됨 · 화면 준비 중')+' · '+
+      (tv.audio?'음향 준비 완료':'TV 창에서 음향 켜기를 누르세요.')
+    if(reports.length>1)label.textContent+=' · 열린 TV 창 '+reports.length+'개'
   }
   operatorChannel.addEventListener('message',event=>{
     if(event.data?.type==='tv-status') {
@@ -47,8 +63,18 @@ export function admin(app:HTMLElement) {
       state=result.state
       connected=true
       operatorChannel.postMessage({type:'refresh'})
-      if(result.token) pair=location.origin+link('/start')+'#'+result.token
-      else if(['start','prepare','disarm','reset','emergency','redraw','import'].includes(action.type)) pair=''
+      if(result.token) pair=location.origin+'/start#'+result.token
+      else if(['start','prepare','disarm','emergency','redraw','savePerson','removePerson','prizeNames'].includes(action.type)) pair=''
+      if(action.type==='prepare')screen='operate'
+      if(action.type==='savePerson'){
+        drafts.delete(action.id?'person:'+action.id:'new-person')
+        editingPerson=undefined
+      }
+      if(action.type==='removePerson'){
+        drafts.delete('person:'+action.id)
+        if(editingPerson===action.id)editingPerson=undefined
+      }
+      if(action.type==='prizeNames')for(const sport of sports)drafts.delete(sport)
       message='저장되었습니다.'
       return true
     } catch(error) {
@@ -65,6 +91,8 @@ export function admin(app:HTMLElement) {
     finally {busy=false;render()}
   }
   function render() {
+    const visibleRoster=app.querySelector('.prep-list')
+    if(visibleRoster)rosterScroll=visibleRoster.scrollTop
     const s=state
     const r=currentRace(s)
     const p=stage(s,s.now)
@@ -75,57 +103,97 @@ export function admin(app:HTMLElement) {
     const active=s.people.filter(x=>x.active)
     const missing=active.filter(x=>!personPhoto(s,x)).length
     const select=(name:string,ref:string,kind:'image'|'audio')=>
-      '<select name="'+name+'"><option value="">기본</option>'+s.assets.filter(a=>a.kind===kind).map(a=>
+      '<select name="'+name+'"><option value="">기본</option>'+s.assets.filter(a=>a.kind===kind&&(!a.targeted||a.id===ref)).map(a=>
         '<option value="'+esc(a.id)+'" '+(assetUrl(s,ref,kind)===endpoint('file',{id:a.id})?'selected':'')+'>'+esc(a.name)+'</option>').join('')+'</select>'
     const preview=(ref:string)=>{const url=assetUrl(s,ref);return url?'<img class="preview" src="'+esc(url)+'" alt="">':''}
-    const control='<section class="panel"><h2>경기 진행</h2><div class="stats">'+sports.map(k=>{
-      const attempt=s.races.find(x=>x.sport===k && !x.invalidated)
-      return '<div><strong>'+esc(s.config.names[k])+'</strong><span>'+(attempt?.completedAt?'완료':r?.sport===k?phase[p]:s.ready?.sport===k?'출발 대기':'대기')+' · 경주 '+s.config.duration[k]+'초</span></div>'
-    }).join('')+'</div><div class="actions">'+
-      (!r && !s.ready && next?'<button data-act="prepare" data-sport="'+next+'">'+esc(s.config.names[next])+' 준비</button>':'')+
-      (s.ready?'<button data-act="start" class="primary" '+(busy?'disabled':'')+'>'+(busy?'처리 중':'START')+'</button><button data-act="'+(s.tabletArmed?'disarm':'arm')+'">'+(s.tabletArmed?'태블릿 비활성화':'태블릿 활성화')+'</button>':'')+
-      (nextLabel?'<button data-act="next" '+(busy||p==='podium'&&!announced?'disabled':'')+'>'+esc(nextLabel)+'</button>':'')+
-      '</div>'+(pair&&s.tabletArmed?'<label>태블릿 시작 링크<input readonly value="'+esc(pair)+'"></label><button id="copy">링크 복사</button>':'')+
-      '<p>참가 '+active.length+'명 · 기본 얼굴 '+missing+'명'+(r?.eligibleCount?' · 추첨 후보 '+r.eligibleCount+'명':'')+'</p>'+
-      (p==='podium'&&announced?'<p>발표 완료 · 사회자 호명과 촬영이 끝나면 진행하세요.</p>':'')+
-      (p==='racing'||p==='countdown'?'<p>경주가 끝나면 시상식을 시작할 수 있습니다.</p>':'')+'</section>'+
-      (s.ready||r && ['countdown','racing','finish'].includes(p)?'<section class="panel"><h2>비상 진행</h2><button data-act="emergency" class="danger">비상 발표</button><p>'+(s.ready?'준비된 종목을 추첨하고 바로 발표합니다.':'현재 경기의 확정 순위로 발표합니다.')+'</p></section>':'')+
-      '<section class="panel"><h2>송출 음향</h2><form id="volume" class="form-grid"><label>BGM<input type="range" min="0" max="1" step=".05" name="bgm" value="'+s.volume.bgm+'"></label><label>효과음<input type="range" min="0" max="1" step=".05" name="sfx" value="'+s.volume.sfx+'"></label><label class="inline"><input type="checkbox" name="muted" '+(s.volume.muted?'checked':'')+'> 음소거</label><button>적용</button></form></section>'
-    const rosterLocked=s.locked||s.races.length>0
-    const data='<section class="panel"><h2>참가자 및 상품</h2><div class="actions"><a class="button" href="/roster-template.xlsx" download>Excel 템플릿</a><label class="button">Excel 선택<input id="workbook" type="file" accept=".xlsx" '+(rosterLocked?'disabled':'')+'></label></div>'+
-      (rosterLocked?'<p>첫 추첨 이후 명단과 상품이 고정됩니다.</p>':'')+
-      (draft?'<div class="notice">'+(draft.errors.length?'<ul>'+draft.errors.map(e=>'<li>'+esc(e)+'</li>').join('')+'</ul>':'<p>가져올 참가자 '+draft.people.filter(x=>x.active).length+'명 · 상품 '+sports.map(k=>esc(draft!.prizes[k].name)).join(' / ')+'</p><button id="apply-import">명단과 상품 적용</button>')+'</div>':'')+
-      '<div class="stats">'+sports.map(k=>'<div>'+preview(s.prizes[k].image)+'<strong>'+esc(s.config.names[k])+'</strong><span>'+esc(s.prizes[k].name||'미등록')+'</span></div>').join('')+'</div>'+
-      '<div class="table-scroll"><table><thead><tr><th>번호</th><th>이름</th><th>조직</th><th>얼굴</th><th>상태</th></tr></thead><tbody>'+s.people.map(x=>{
-        const url=personPhoto(s,x)
-        return '<tr><td>'+esc(x.id)+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.team)+'</td><td>'+(url?'<img class="preview" loading="lazy" src="'+esc(url)+'" alt="">':'기본')+' '+esc(x.photo)+'</td><td>'+(x.active?'참가':'불참')+'</td></tr>'
-      }).join('')+'</tbody></table></div></section>'
-    const settings='<section class="panel"><h2>에셋 파일</h2><p>사진과 상품 이미지는 Excel에 입력한 파일명으로 연결됩니다. 같은 이름으로 올리면 새 파일이 사용됩니다.</p><label class="button">파일 추가<input id="upload" type="file" accept=".jpg,.jpeg,.png,.webp,.mp3,.wav,.ogg" multiple></label><ul class="asset-list">'+s.assets.map(a=>'<li>'+preview(a.id)+'<span>'+esc(a.name)+'</span>'+(s.locked?'':'<button data-remove="'+a.id+'">연결 해제</button>')+'</li>').join('')+'</ul></section>'+
+    const locked=preparationLocked(s)
+    const operate=!!(s.ready||s.races.length)
+    const selected=operate?screen??'operate':'prepare'
+    const folder=(id:string,label:string,html:string)=>'<details class="panel" data-fold="'+id+'" '+(expanded.has(id)?'open':'')+'><summary>'+label+'</summary>'+html+'</details>'
+    const photoInput=(label:string,target:string,id:string)=>'<label class="button">'+label+
+      '<input type="file" accept="image/jpeg,image/png,image/webp" data-upload="'+target+'" data-id="'+esc(id)+'"></label>'
+    const sport=(r??s.ready)?.sport
+    const sportProgress='<ol class="sport-steps" aria-label="종목 진행 순서">'+sports.map(k=>{
+      const done=s.races.some(attempt=>attempt.sport===k&&attempt.completedAt&&!attempt.invalidated)
+      return '<li '+(k===sport?'aria-current="step"':'')+'>'+esc(s.config.names[k])+(done?' <small>완료</small>':'')+'</li>'
+    }).join('')+'</ol>'
+    const cue=p==='ready'?'TV 화면과 음향을 확인한 뒤 START를 누르세요. 누르면 당첨 결과가 저장되고 카운트다운이 시작됩니다.':
+      p==='countdown'?'TV 화면에서 출발 카운트다운을 확인하세요.':
+      p==='racing'?'경주가 끝나면 시상식 시작 버튼이 나타납니다.':
+      p==='finish'?'사회자의 발표 신호에 맞춰 시상식을 시작하세요. 3위부터 차례대로 공개됩니다.':
+      p==='podium'?(announced?'호명과 촬영이 끝나면 다음 단계로 진행하세요.':'수상자 공개가 끝나면 다음 단계로 이동할 수 있습니다.'):''
+    const control=(p!=='complete'?'<section class="panel operation-main">'+sportProgress+'<h2>'+esc(sport?s.config.names[sport]+' · '+phase[p]:phase[p])+'</h2>'+
+      (cue?'<p class="operation-cue">'+cue+'</p>':'')+
+      '<div class="actions">'+
+      (s.ready?'<button data-act="start" class="primary">START</button>':'')+
+      (nextLabel?'<button class="primary" data-act="next" '+(p==='podium'&&!announced?'disabled':'')+'>'+esc(nextLabel)+'</button>':'')+
+      '</div></section>':'')+
+      (s.ready?folder('tablet','태블릿 시작','<p><button data-act="'+(s.tabletArmed?'disarm':'arm')+'">'+(s.tabletArmed?'태블릿 비활성화':'태블릿 활성화')+'</button></p>'+
+        (pair&&s.tabletArmed?'<label>태블릿 시작 링크<input readonly value="'+esc(pair)+'"></label><button id="copy">링크 복사</button>':'')):'')+
+      folder('volume','송출 음향','<form id="volume" class="form-grid"><label>BGM<input type="range" min="0" max="1" step=".05" name="bgm" value="'+s.volume.bgm+'"></label><label>효과음<input type="range" min="0" max="1" step=".05" name="sfx" value="'+s.volume.sfx+'"></label><label class="inline"><input type="checkbox" name="muted" '+(s.volume.muted?'checked':'')+'> 음소거</label><button>적용</button></form>')+
+      (s.ready||r&&['countdown','racing','finish'].includes(p)?folder('emergency','비상 진행','<p><button data-act="emergency" class="danger">비상 발표</button></p>'):'')
+    const data='<section class="panel prep-roster" id="prep-roster"><h2>참가자</h2>'+
+      (active.length?'<p>참가 '+active.length+'명 · 사진 미등록 '+missing+'명'+(missing?' (게임에서 기본 얼굴 사용)':'')+'</p>':
+        '<p>이름을 입력해 참가자를 추가하세요. 사진은 추가한 행에서 올릴 수 있습니다.</p>')+
+      (!locked?'<form class="prep-add" data-person=""><label>참가자 이름<input required maxlength="80" name="name" data-draft="new-person" value="'+esc(drafts.get('new-person')??'')+'"></label><button>추가</button></form>':'')+
+      (s.people.length?'<ul class="prep-list">'+s.people.map(person=>{
+        const url=personPhoto(s,person)
+        return '<li>'+(url?'<img class="preview" loading="lazy" src="'+esc(url)+'" alt="">':'<span class="prep-avatar" aria-hidden="true"></span>')+
+          (!locked&&editingPerson===person.id?'<form data-person="'+esc(person.id)+'"><input aria-label="이름 · '+esc(person.name)+'" required maxlength="80" name="name" data-draft="person:'+esc(person.id)+'" value="'+esc(drafts.get('person:'+person.id)??person.name)+'"><button>저장</button><button type="button" data-name-cancel>취소</button></form>':'<strong>'+esc(person.name)+'</strong>')+
+          (!person.active?'<small>제외됨</small>':'')+
+          (!locked?photoInput(url?'사진 바꾸기':'사진 올리기','person',person.id)+(editingPerson===person.id?'':'<button data-name-edit="'+esc(person.id)+'" class="quiet">이름 수정</button>')+'<button data-person-remove="'+esc(person.id)+'" class="quiet" aria-label="'+esc(person.name)+' 삭제">삭제</button>':'')+'</li>'
+      }).join('')+'</ul>':'')+'</section>'+
+      '<section class="panel" id="prep-prizes"><h2>종목별 상품</h2><form id="prize-names" class="form-grid">'+sports.map(k=>'<label>'+esc(s.config.names[k])+' 상품명<input maxlength="100" name="'+k+'" data-draft="'+k+'" value="'+esc((locked?undefined:drafts.get(k))??s.prizes[k].name)+'" '+(locked?'readonly':'')+'></label>').join('')+
+      (!locked?'<button>상품명 저장</button>':'')+'</form></section>'
+    const settings='<section><h3>송출 파일</h3><p>상품 이미지는 종목별로 연결하세요.</p><div class="actions">'+sports.map(k=>preview(s.prizes[k].image)+photoInput(esc(s.config.names[k])+' 상품 이미지','prize',k)).join('')+'</div><label class="button">방송 파일 추가<input data-upload="general" type="file" accept=".jpg,.jpeg,.png,.webp,.mp3,.wav,.ogg" multiple></label><ul class="asset-list">'+s.assets.filter(a=>!a.targeted&&!s.people.some(p=>p.photo===a.id)&&!sports.some(k=>s.prizes[k].image===a.id)).map(a=>'<li>'+preview(a.id)+'<span>'+esc(a.name)+'</span>'+(s.locked?'':'<button data-remove="'+a.id+'">연결 해제</button>')+'</li>').join('')+'</ul></section>'+
       '<section class="panel"><h2>방송 설정</h2><form id="config" class="form-grid"><label>타이틀<input required name="title" maxlength="100" value="'+esc(s.config.title)+'"></label><label>로고'+select('logo',s.config.logo,'image')+'</label><label>사장님 얼굴'+select('starter',s.config.starter,'image')+'</label>'+
+      '<label>시상식 포토월'+select('podiumBackdrop',s.config.podiumBackdrop??'','image')+'</label><label>달리기 경기장 광고판'+select('stadiumAd',s.config.stadiumAd??'','image')+'</label>'+
       sports.map(k=>'<fieldset><legend>'+labels[k]+'</legend><label>종목명<input required name="name-'+k+'" value="'+esc(s.config.names[k])+'"></label><label>경주 시간(초)<input name="duration-'+k+'" type="number" min="15" max="120" value="'+s.config.duration[k]+'"></label><label>이벤트 자막<input required name="caption-'+k+'" value="'+esc(s.config.captions[k])+'"></label></fieldset>').join('')+
       audioSlots.map((k,i)=>'<label>'+audioNames[i]+select('audio-'+k,s.config.audio[k]??'','audio')+'</label>').join('')+'<button>방송 설정 저장</button></form></section>'
-    const results='<section class="panel"><h2>추첨 결과와 변경 이력</h2><a class="button" href="'+esc(endpoint('csv'))+'">공식 결과 CSV</a>'+
+    const history='<section class="panel"><h3>추첨 이력</h3>'+
       (s.races.length?s.races.slice().reverse().map(x=>'<article class="attempt"><h3>'+esc(s.config.names[x.sport])+' <small>'+(x.invalidated?'무효':x.winners.length?'확정':'경기 진행 중')+'</small></h3>'+
         x.winners.map((w,i)=>'<p>'+(i+1)+'위 · '+esc(w.id)+' '+esc(w.name)+' · '+esc(w.prize)+'</p>').join('')+
         (x.createdAt?'<p>추첨 '+esc(new Date(x.createdAt).toLocaleString('ko-KR'))+' · 후보 '+x.eligibleCount+'명</p>':'')+
         (x.invalidated?'<p>무효 처리 '+esc(new Date(x.invalidated.at).toLocaleString('ko-KR'))+' · '+esc(x.invalidated.reason)+'</p>'+
           (x.invalidated.redrawId?'<p>새 결과 · '+esc(s.races.find(y=>y.redrawId===x.invalidated?.redrawId&&y.sport===x.sport)?.winners.map((w,i)=>(i+1)+'위 '+w.id+' '+w.name).join(' / ')||'재실행 또는 결승 대기')+'</p>':''):
-          '<button data-redraw="'+x.sport+'" class="danger">'+esc(s.config.names[x.sport])+' 재추첨</button>')+'</article>').join(''):'<p>추첨 기록이 없습니다.</p>')+'</section>'+
-      (s.mode==='rehearsal'?'<section class="panel"><h2>리허설 기록 관리</h2><button data-act="reset" class="danger">리허설 초기화</button><p>세 종목의 결과와 이력, 등록한 명단·상품, 에셋 연결과 설정을 초기화합니다.</p></section>':'')
-    app.innerHTML='<div class="admin"><header><div><div class="eyebrow">SKT · TRIATHLON</div><h1>운영 콘솔</h1></div><div class="actions"><a class="button" href="'+link('/display')+'" target="_blank" rel="noopener">TV 송출 열기</a><a class="button" href="/admin?mode='+(mode==='live'?'rehearsal':'live')+'">'+(mode==='live'?'리허설 전환':'본행사 전환')+'</a></div></header><nav>'+
-      Object.entries({control:'경기 진행',data:'참가자·상품',settings:'에셋·방송 설정',results:'결과·이력'}).map(([k,v])=>'<button data-tab="'+k+'" aria-pressed="'+(screen===k)+'">'+v+'</button>').join('')+
-      '</nav><div class="status" data-stage="'+p+'" data-revision="'+s.revision+'"><strong>'+(mode==='live'?'본행사':'리허설')+'</strong><span>'+esc((r||s.ready)?s.config.names[(r??s.ready)!.sport]+' · ':'')+phase[p]+'</span><span id="message" role="status">'+esc(message)+'</span>'+
-      (retry?'<button id="retry">같은 요청 재시도</button>':'')+'</div><div class="status"><strong>TV 송출</strong><span id="tv-status"></span></div><div '+(busy||retry||!connected?'inert':'')+'>'+({control,data,settings,results}[screen]??control)+'</div></div>'
+          '<button data-redraw="'+x.sport+'" class="danger">'+esc(s.config.names[x.sport])+' 재추첨</button>')+'</article>').join(''):'<p>추첨 기록이 없습니다.</p>')+'</section>'
+    const csvLink='<a class="button" href="'+esc(endpoint('csv'))+'">CSV 다운로드</a>'
+    const summary=p==='complete'?'<section class="panel"><div class="results-heading"><h2>최종 당첨 결과</h2>'+csvLink+'</div><div class="stats">'+sports.map(k=>{
+      const result=s.races.find(attempt=>attempt.sport===k&&!attempt.invalidated)
+      return '<div><strong>'+esc(s.config.names[k])+'</strong><ol>'+result?.winners.map(w=>'<li>'+esc(w.name)+' · '+esc(w.prize)+'</li>').join('')+'</ol></div>'
+    }).join('')+'</div></section>':''
+    const pendingDraft=drafts.size>0
+    const prizesReady=sports.filter(k=>s.prizes[k].name.trim()).length
+    const footer=!locked&&!operate?'<section class="panel prep-next"><div><h2>운영 전 준비</h2><div class="prep-checks">'+
+      '<a href="#prep-roster">참가자 '+active.length+'명 <small>최소 9명</small></a>'+
+      '<a href="#prep-prizes">상품명 '+prizesReady+'/3 <small>저장 완료</small></a></div>'+
+      '<p id="prep-hint">'+prepStatus(s,pendingDraft)+'</p></div>'+
+      '<button class="primary" data-act="prepare" data-sport="'+(next??'swimming')+'" '+(!canPrepare(s)||pendingDraft?'disabled':'')+'>경기 운영으로</button></section>':''
+    const preparation=footer+(locked?'<p>첫 추첨 이후 준비 정보는 읽기 전용입니다.</p>':'')+data+
+      (!locked?folder('settings','방송 설정',settings):'')
+    const operations=summary+control+(s.races.some(attempt=>s.now>=attempt.endsAt)?folder('history','결과 및 복구',(p==='complete'?'':csvLink)+history):'')
+    const tvPanel=selected==='operate'&&p!=='complete'?'<section class="panel operation-tv"><div><h2>TV 송출</h2><p id="tv-status"></p>'+
+      (p==='ready'?'<p>TV 창의 <strong>음향 켜기</strong>와 <strong>전체 화면</strong>을 누르세요.</p>':'')+
+      '</div><a class="button" href="/display" target="triathlon-display">TV 송출 열기</a></section>':''
+    app.innerHTML='<div class="admin prep-admin"><header><h1>철인3종 운영 콘솔</h1></header><nav aria-label="운영 단계">'+
+      '<button data-tab="prepare" aria-pressed="'+(selected==='prepare')+'">참가자 준비</button>'+
+      '<button data-tab="operate" aria-pressed="'+(selected==='operate')+'" '+(!operate?'disabled':'')+'>경기 운영</button>'+
+      '</nav><div class="status operation-status" data-stage="'+p+'" data-revision="'+s.revision+'" '+(!message&&!retry?'hidden':'')+'><span id="message" role="status">'+esc(message)+'</span>'+
+      (retry?'<button id="retry">같은 요청 재시도</button>':'')+'</div>'+
+      tvPanel+
+      '<div '+(busy||retry||!connected?'inert':'')+'>'+(selected==='prepare'?preparation:operations)+'</div></div>'
     bind()
+    const roster=app.querySelector('.prep-list')
+    if(roster)roster.scrollTop=rosterScroll
     tvStatus()
   }
   function bind(){
     const retryButton=app.querySelector<HTMLButtonElement>('#retry')
     if(retryButton)retryButton.onclick=()=>void retry?.()
-    app.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b=>b.onclick=()=>{if(!busy){screen=b.dataset.tab!;render()}})
+    app.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b=>b.onclick=()=>{if(!busy){screen=b.dataset.tab==='prepare'?'prepare':'operate';render()}})
     app.querySelectorAll<HTMLButtonElement>('[data-act]').forEach(b=>b.onclick=()=>{
       const type=b.dataset.act as Action['type']
-      if((type==='reset'||type==='emergency')&&!confirm(type==='reset'?'수영·사이클·달리기 리허설의 결과와 이력, 명단·상품, 에셋 연결과 설정을 초기화할까요?':'비상 발표로 전환할까요?')) return
+      if(type==='emergency'&&!confirm('비상 발표로 전환할까요?'))return
       void act(type==='prepare'?{type,sport:b.dataset.sport as Sport}:{type} as Action)
     })
     app.querySelectorAll<HTMLButtonElement>('[data-redraw]').forEach(b=>b.onclick=()=>{
@@ -137,16 +205,59 @@ export function admin(app:HTMLElement) {
     app.querySelectorAll<HTMLButtonElement>('[data-remove]').forEach(b=>b.onclick=()=>void act({type:'removeAsset',id:b.dataset.remove!}))
     const get=<T extends HTMLElement>(selector:string)=>app.querySelector<T>(selector)
     const copy=get<HTMLButtonElement>('#copy');if(copy)copy.onclick=()=>void navigator.clipboard.writeText(pair).then(()=>tell('링크를 복사했습니다.'),()=>tell('링크 입력란에서 직접 복사하세요.'))
-    const workbook=get<HTMLInputElement>('#workbook');if(workbook)workbook.onchange=async()=>{
-      const file=workbook.files?.[0];if(!file)return
-      try {draft=await parseWorkbook(file);message='';render()} catch(error){tell((error as Error).message)}
+    app.querySelectorAll<HTMLDetailsElement>('details[data-fold]').forEach(details=>details.ontoggle=()=>{
+      if(details.open)expanded.add(details.dataset.fold!)
+      else expanded.delete(details.dataset.fold!)
+    })
+    app.querySelectorAll<HTMLInputElement>('[data-draft]').forEach(input=>input.oninput=()=>{
+      const key=input.dataset.draft!
+      const previous=key==='new-person'?'':key.startsWith('person:')?
+        state.people.find(p=>p.id===key.slice(7))?.name:state.prizes[key as Sport].name
+      if(input.value===previous)drafts.delete(key)
+      else drafts.set(key,input.value)
+      const prepare=get<HTMLButtonElement>('[data-act=prepare]')
+      if(prepare)prepare.disabled=!canPrepare(state)||drafts.size>0
+      const hint=get<HTMLElement>('#prep-hint')
+      if(hint)hint.textContent=prepStatus(state,drafts.size>0)
+    })
+    app.querySelectorAll<HTMLButtonElement>('[data-name-edit]').forEach(button=>button.onclick=()=>{
+      if(editingPerson)drafts.delete('person:'+editingPerson)
+      editingPerson=button.dataset.nameEdit
+      render()
+      get<HTMLInputElement>('.prep-list input[name=name]')?.focus()
+    })
+    const cancelName=get<HTMLButtonElement>('[data-name-cancel]')
+    if(cancelName)cancelName.onclick=()=>{
+      drafts.delete('person:'+editingPerson)
+      editingPerson=undefined
+      render()
     }
-    const applyImport=get<HTMLButtonElement>('#apply-import');if(applyImport)applyImport.onclick=async()=>{
-      if(draft&&await act({type:'import',people:draft.people,prizes:draft.prizes})){draft=undefined;render()}
+    app.querySelectorAll<HTMLFormElement>('[data-person]').forEach(form=>form.onsubmit=async e=>{
+      e.preventDefault()
+      const id=form.dataset.person||undefined
+      const name=String(new FormData(form).get('name')??'')
+      if(await act({type:'savePerson',id,name})&&!id){
+        const roster=get<HTMLElement>('.prep-list')
+        if(roster)roster.scrollTop=roster.scrollHeight
+        get<HTMLInputElement>('.prep-add input')?.focus({preventScroll:true})
+      }
+    })
+    app.querySelectorAll<HTMLButtonElement>('[data-person-remove]').forEach(button=>button.onclick=()=>{
+      const id=button.dataset.personRemove!
+      const person=state.people.find(p=>p.id===id)
+      if(person&&confirm(person.name+' 님을 명단에서 삭제할까요?'))void act({type:'removePerson',id})
+    })
+    const prizes=get<HTMLFormElement>('#prize-names')
+    if(prizes)prizes.onsubmit=e=>{
+      e.preventDefault()
+      const names=Object.fromEntries(new FormData(prizes)) as Record<Sport,string>
+      void act({type:'prizeNames',names})
     }
-    const upload=get<HTMLInputElement>('#upload');if(upload)upload.onchange=async()=>{
+    app.querySelectorAll<HTMLInputElement>('[data-upload]').forEach(upload=>upload.onchange=async()=>{
       const list=Array.from(upload.files??[])
       if(!list.length)return
+      const target=upload.dataset.upload!
+      const fields:Record<string,string>=target==='general'?{}:{[target]:upload.dataset.id!}
       busy=true;render()
       const errors:string[]=[]
       try {
@@ -154,16 +265,20 @@ export function admin(app:HTMLElement) {
           tell('업로드 중 · '+file.name)
           try {
             const payload=file.type.startsWith('image/')?await resize(file):file
-            if(payload.size>4_000_000) throw new Error('4 MB 이하 파일을 사용하세요.')
-            const result=await mutate<{state:ViewState}>('upload',payload,state.revision,{name:file.name})
+            if(payload.size>4_000_000)throw new Error('4 MB 이하 파일을 사용하세요.')
+            const result=await mutate<{state:ViewState}>('upload',payload,state.revision,{name:file.name,...fields})
             state=result.state
+            if(target!=='general')pair=''
             operatorChannel.postMessage({type:'refresh'})
-          } catch(error){errors.push(file.name+' '+(error as Error).message); if(error instanceof ApiError&&error.status===409)state=await api('state')}
+          }catch(error){
+            errors.push(file.name+' '+(error as Error).message)
+            if(error instanceof ApiError&&error.status===409)state=await api('state')
+          }
         }
         message=errors.length?errors.join(' / '):list.length+'개 파일을 등록했습니다.'
-      } catch(error){message=(error as Error).message}
+      }catch(error){message=(error as Error).message}
       finally{busy=false;render()}
-    }
+    })
     const volume=get<HTMLFormElement>('#volume');if(volume)volume.onsubmit=e=>{
       e.preventDefault();const f=new FormData(volume)
       void act({type:'volume',volume:{bgm:Number(f.get('bgm')),sfx:Number(f.get('sfx')),muted:f.has('muted')}})
@@ -172,6 +287,7 @@ export function admin(app:HTMLElement) {
       e.preventDefault();const f=new FormData(config);const v=(key:string)=>String(f.get(key)??'')
       const c:Config=structuredClone(state.config)
       c.title=v('title');c.logo=v('logo');c.starter=v('starter')
+      c.podiumBackdrop=v('podiumBackdrop');c.stadiumAd=v('stadiumAd')
       sports.forEach(k=>{c.names[k]=v('name-'+k);c.duration[k]=Number(v('duration-'+k));c.captions[k]=v('caption-'+k)})
       audioSlots.forEach(k=>{c.audio[k]=v('audio-'+k)})
       void act({type:'config',config:c})
@@ -192,7 +308,7 @@ export function admin(app:HTMLElement) {
       else tvStatus()
     },error=>{
       if(error instanceof ApiError&&error.status===401){stop();loginPanel(app,connect)}
-      else if(!state)app.innerHTML='<section class="gate"><h1>운영 연결</h1><p>'+esc((error as Error).message)+'</p><a href="/admin?mode=rehearsal">리허설 열기</a></section>'
+      else if(!state)app.innerHTML='<section class="gate"><h1>운영 연결</h1><p>'+esc((error as Error).message)+'</p><a href="/admin">관리자 열기</a></section>'
       else if(connected&&!busy){connected=false;if(!retry)message='서버 재연결 중 · 현재 단계에서 대기해 주세요.';render()}
     },true)
   }

@@ -1,10 +1,13 @@
-import {findAsset,type State,type Mode,type Person} from './model.ts'
-export type ViewState=Omit<State,'requests'|'pairing'> & {now:number;tabletArmed:boolean}
+import {findAsset,type State,type Person} from './model.ts'
+export type ViewState=Omit<State,'requests'|'pairing'|'mode'> & {now:number;tabletArmed:boolean}
 export type TvStatus={id:string; revision:number; audio:boolean; graphics:'loading'|'3d'|'html'; online:boolean; graphicsIssue?:string}
-const params=new URLSearchParams(location.search)
-export const mode:Mode=params.get('mode')==='live'?'live':'rehearsal'
-export const operatorChannel=new BroadcastChannel('triathlon-operator-'+mode)
-export const endpoint=(op:string,options:Record<string,string>={})=>'/api/event?'+new URLSearchParams({op,mode,...options})
+export const legacyMode=new URLSearchParams(location.search).get('mode')
+export const operatorChannel=new BroadcastChannel('triathlon-operator')
+export const endpoint=(op:string,options:Record<string,string>={})=>{
+  const query=new URLSearchParams({op,...options})
+  if(legacyMode!==null)query.set('mode',legacyMode)
+  return '/api/event?'+query
+}
 export function assetUrl(state:ViewState,ref:string,kind:'image'|'audio'='image') {
   const asset=findAsset(state,ref)
   return asset?.kind===kind?endpoint('file',{id:asset.id}):''
@@ -33,7 +36,6 @@ export function mutation<T=unknown>(op:string,body:BodyInit,revision:number,opti
 }
 export const mutate=<T=unknown>(...args:Parameters<typeof mutation<T>>)=>mutation<T>(...args)()
 export const esc=(s:unknown)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
-export const link=(path:string)=>path+'?mode='+mode
 export function loginPanel(app:HTMLElement,onSuccess:()=>void) {
   app.innerHTML='<section class="gate"><div class="eyebrow">SKT · 2026</div><h1>철인3종 럭키드로우</h1><form><label>운영 비밀번호<input type="password" name="password" required autofocus autocomplete="current-password"></label><button>로그인</button><p role="alert"></p></form></section>'
   const form=app.querySelector('form')!
