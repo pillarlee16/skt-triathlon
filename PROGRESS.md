@@ -172,6 +172,11 @@
 - 1차 비교에서 넓은 결승 화면의 입자가 약해 크기와 대비를 보강했습니다. `node .local/running-surface-qa.mjs final http://127.0.0.1:5205 'running-(ready|start|leaders|event|finish|custom-ad)$'`로 1080p 여섯 장을 브라우저 오류 없이 촬영했습니다. 직전 게임·ImageGen 시안·개선 게임 비교와 확대는 로컬 `output/playwright/running-surface`에 있습니다.
 - `node .local/running-surface-live.mjs`로 가상 선수 90명의 40초 달리기 완주를 확인했고 1080p 프레임 간격 95백분위는 13.4ms였습니다. 자동 테스트 11개, 타입 검사, 빌드, `git diff --check`가 통과했습니다. 기존 번들 크기 경고와 현장 디스플레이 검증이 남아 있습니다.
 
+## Vercel 배포와 기존 데이터 호환성
+
+- 화면과 운영 변경을 `ff9a210`에 커밋했습니다. GitHub의 Vercel Preview 및 Production 빌드 성공과 운영 주소의 빌드 파일을 확인했습니다. Preview는 Vercel 계정 로그인이 필요한 상태입니다.
+- 운영 사이트 검증 중 본행사 활성화 값이 없는 환경에서 관리자 API가 403을 반환했습니다. Production은 명시적으로 활성화할 때만 본행사 경로를 사용하고, 활성화 전에는 기존 저장 경로를 이어서 사용하도록 복구했습니다. Preview 저장 경로를 분리했습니다. 로컬 자동 테스트 12개, 타입 검사, 빌드, `git diff --check`를 통과했습니다.
+
 ## 다음 작업
 
 1. README 배포 절차에 따라 별도의 가상 데이터 Vercel Preview에서 저장소·재접속, START/NEXT 전환 실측, 3·2·1을 확인합니다.

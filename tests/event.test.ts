@@ -9,6 +9,29 @@ const post=(op:string,body:unknown,headers:Record<string,string>={})=>eventApi.f
 }))
 const state=(cookie:string,op='state')=>eventApi.fetch(new Request(url(op),{headers:{cookie}}))
 
+test('the deployment selects live state only when production explicitly enables it',async t=>{
+  const keys=['VERCEL','VERCEL_ENV','APP_LIVE_ENABLED'] as const
+  const saved=keys.map(key=>process.env[key])
+  t.after(()=>keys.forEach((key,i)=>{
+    const value=saved[i]
+    if(value===undefined)delete process.env[key]
+    else process.env[key]=value
+  }))
+  const get=(mode?:string)=>eventApi.fetch(new Request(url('state',mode)))
+  process.env.VERCEL='1'
+  process.env.VERCEL_ENV='production'
+  delete process.env.APP_LIVE_ENABLED
+  assert.equal((await get()).status,401)
+  assert.equal((await get('rehearsal')).status,401)
+  assert.equal((await get('live')).status,403)
+  process.env.APP_LIVE_ENABLED='true'
+  assert.equal((await get('live')).status,401)
+  assert.equal((await get('rehearsal')).status,403)
+  process.env.VERCEL_ENV='preview'
+  assert.equal((await get('live')).status,403)
+  assert.equal((await get('rehearsal')).status,401)
+})
+
 test('authenticated operation commits START and NEXT once, including delayed retries',async t=>{
   let now=Date.now()
   t.mock.method(Date,'now',()=>now)

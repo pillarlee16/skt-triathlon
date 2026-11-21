@@ -10,7 +10,7 @@ const safeEqual=(a:string,b:string)=>timingSafeEqual(sha(a),sha(b))
 const password=()=>process.env.ADMIN_PASSWORD ?? (local?'rehearsal':'')
 const secret=()=>process.env.SESSION_SECRET ?? (local?'local-rehearsal-only':'')
 const sign=(value:string)=>createHmac('sha256',secret()).update(value).digest('base64url')
-const root=(mode:Mode)=>'triathlon-v1/'+mode+'/'
+const root=(mode:Mode)=>'triathlon-v1/'+(process.env.VERCEL_ENV==='preview'?'preview':mode)+'/'
 const headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}
 const json=(body:unknown,status=200,extra:HeadersInit={})=>Response.json(body,{status,headers:{...headers,...extra}})
 const fileMemory=new Map<string,{bytes:ArrayBuffer; mime:string}>()
@@ -80,13 +80,11 @@ function imageType(bytes:Uint8Array) {
 export default {async fetch(request:Request):Promise<Response> {
   const url=new URL(request.url)
   const op=url.searchParams.get('op')??'state'
-  const mode:Mode=process.env.VERCEL&&process.env.VERCEL_ENV==='production'?'live':'rehearsal'
+  const liveEnabled=!!process.env.VERCEL&&process.env.VERCEL_ENV==='production'&&process.env.APP_LIVE_ENABLED==='true'
+  const mode:Mode=liveEnabled?'live':'rehearsal'
   const legacyMode=url.searchParams.get('mode')
   if (legacyMode!==null&&legacyMode!==mode) return json({error:'이 링크는 현재 배포 환경에서 사용할 수 없습니다.'},403)
   const now=Date.now()
-  if (mode==='live' && process.env.APP_LIVE_ENABLED!=='true') {
-    return json({error:'운영 배포가 활성화되지 않았습니다.'},403)
-  }
   if (!password() || (!local && secret().length<32)) return json({error:'운영 환경의 인증 설정을 확인하세요.'},503)
   const admin=isAdmin(request)
   try {
