@@ -65,10 +65,12 @@ export function createTrack(host:HTMLElement) {
     const sprite=new T.Sprite(new T.SpriteMaterial({map:texture,alphaTest:.1}))
     sprite.scale.set(1.48,1.48,1);players.add(sprite);return sprite
   }
-  function setup(kind:Sport,roster:Runner[],photo:(person:Person)=>HTMLImageElement|undefined) {
+  const podiumX=[0,-3.7,3.7]
+  const podiumHeight=[1.15,.75,.45]
+  function setup(kind:Sport,roster:Runner[],photo:(person:Person)=>HTMLImageElement|undefined,podium=false) {
     generation++; sport=kind;runners=roster
     dispose(course);dispose(players);obstacles=[]
-    const swim=sport==='swimming',bike=sport==='cycling'
+    const swim=!podium&&sport==='swimming',bike=!podium&&sport==='cycling'
     scene.background=new T.Color(swim?0x14345f:bike?0x302040:0x25182e)
     scene.fog=new T.FogExp2(scene.background,.012)
     box(200,.5,73,0,-.6,-world/2,swim?0x1a6084:bike?0x315347:0x317455)
@@ -86,7 +88,8 @@ export function createTrack(host:HTMLElement) {
     }
     for(const x of [-11.5,11.5])box(.45,5,.5,x,2.45,-world,0xf43d6e)
     box(23.5,.55,.55,0,4.9,-world,0xf43d6e)
-    for(let i=0;i<8;i++)obstacles.push(box(swim?2.7:1.15,swim?.16:.72,.32,-9+i*2.55,-2,-world*.47,swim?0xb7f4ff:0xfabb53))
+    for(let i=0;i<8;i++)obstacles.push(box(swim?2.7:bike?1.15:1.6,swim?.16:bike?.72:.38,.32,-9+i*2.55,-2,-world*.47,swim?0xb7f4ff:0xfabb53))
+    if(podium)podiumX.forEach((x,i)=>box(3.25,podiumHeight[i],2,x,podiumHeight[i]/2,-world+4,[0xd7a443,0x9eaac2,0xae7053][i]))
     const specs:[[number,number,number],boolean][]=[[[.66,.58,.47],false],[[.17,.55,.18],false],[[.17,.55,.18],false],[[.2,.5,.21],false],[[.2,.5,.21],false]]
     if(bike)specs.push([[.26,.035,.22],true],[[.26,.035,.22],true],[[.15,.2,1.05],false])
     parts=specs.map(([size,wheel])=>{
@@ -96,39 +99,52 @@ export function createTrack(host:HTMLElement) {
     })
     runners.forEach((r,i)=>parts.forEach((part,j)=>part.setColorAt(i,new T.Color(j===0||j===7?(r.person.color??colors[r.lane%colors.length]):j>=5?'#212438':j<=2?'#ffd7ad':'#353451'))))
     heads=runners.map(r=>head(r.person,photo(r.person),generation))
-    camera.position.set(19,19,19);look.set(0,0,-14)
+    if(podium){camera.position.set(0,3.4,-world+15);look.set(0,.35,-world+4)}
+    else {camera.position.set(19,19,19);look.set(0,0,-14)}
   }
   let w=0,h=0
-  function frame(t:number,time:number,shot:string,focus:Runner|undefined,starter=false) {
+  const laneX=(runner:Runner)=> (runner.lane%15-7)*1.4
+  function frame(t:number,time:number,shot:string,leaders:Runner[],starter=false,revealed=0) {
     if(w!==host.clientWidth||h!==host.clientHeight){
       w=host.clientWidth;h=host.clientHeight
       if(w&&h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
     }
-    const swim=sport==='swimming',bike=sport==='cycling'
+    const podium=shot==='podium'
+    const swim=!podium&&sport==='swimming',bike=!podium&&sport==='cycling'
     runners.forEach((r,i)=>{
       const leading=position(r,t)
       const phase=time*(swim?8:bike?14:16)+r.lane
-      const x=(r.lane%15-7)*1.4 + .27*Math.sin(t*13+r.lane)
-      const z=-world*leading+(Math.floor(r.lane/15)*1.65)*Math.max(0,1-t*5)
-      const y=(swim?.28:bike?1.03:.82)+(t>0?.105*Math.abs(Math.sin(phase)):0)
+      const x=podium?podiumX[r.rank]:laneX(r)+.27*Math.sin(t*13+r.lane)
+      const z=podium?-world+4:-world*leading+(Math.floor(r.lane/15)*1.65)*Math.max(0,1-t*5)
+      const hurdle=!podium&&sport==='running'&&t>.36&&t<.59?.75*Math.exp(-(((leading-.47)/.021)**2)):0
+      const y=podium?.82+podiumHeight[r.rank]+.17*Math.abs(Math.sin(time*3+r.rank)):
+        (swim?.28:bike?1.03:.82)+(t>0?.105*Math.abs(Math.sin(phase)):0)+hurdle
+      const visible=!podium||r.rank>=3-revealed
       const starterPose=starter && r.lane===0
       parts.forEach((part,j)=>{
         const [dx,dy,dz]=body[j]
-        const angle= t>0 ? Math.sin(phase+(j%2)*Math.PI)*(j<3?1: .7):0
+        const angle=podium?j===1?-2.4+.35*Math.sin(time*5):0:t>0?Math.sin(phase+(j%2)*Math.PI)*(j<3?1:.7):0
         matrix.position.set(x+dx,y+dy,z+dz+(j>0&&j<5?angle*.17:0))
         matrix.rotation.set(j===0?(swim?1.1:bike?.25:0):j===5||j===6?0:angle, j===5||j===6?Math.PI/2:0,starterPose&&j===1?-2.5:0)
-        matrix.updateMatrix();part.setMatrixAt(i,matrix.matrix)
+        matrix.scale.setScalar(visible?1:0);matrix.updateMatrix();part.setMatrixAt(i,matrix.matrix)
       })
+      heads[i].visible=visible
       heads[i].position.set(x,y+(swim?.63:.93),z-(swim?.46:.04))
     })
     parts.forEach(part=>{part.instanceMatrix.needsUpdate=true})
     obstacles.forEach((o,i)=>{o.position.y=t>.36&&t<.59?(swim?.28+.24*Math.sin(time*8+i):.28):-2})
+    const focus=leaders[0]
     const p=focus?position(focus,t):0
     const z=-world*p
-    if(shot==='finish'){goal.set(12,5,-world-13);look.lerp(new T.Vector3(0,1,-world+4),.08)}
+    if(podium){goal.set(0,3.4,-world+15);look.set(0,.35,-world+4)}
+    else if(shot==='finish'){goal.set(13,5.5,-world-13);look.lerp(new T.Vector3(0,1,-world+3),.08)}
     else if(shot==='leader'||shot==='event'){
-      const x=focus?(focus.lane%15-7)*1.4:0
-      goal.set(x+(shot==='event'?4:6),4.3,z-8);look.lerp(new T.Vector3(x,1,z+1),.11)
+      const xs=leaders.map(laneX)
+      const min=xs.length?Math.min(...xs):0,max=xs.length?Math.max(...xs):0
+      const x=shot==='event'&&focus?laneX(focus):(min+max)/2-2.4
+      const distance=shot==='event'?8:Math.max(12,(max-min)*.72+5)
+      goal.set(x+(shot==='event'?4:3),shot==='event'?4.5:6,z-distance)
+      look.lerp(new T.Vector3(x,1,z+1),.08)
     } else {
       goal.set(18,22,z-20);look.lerp(new T.Vector3(0,0,z+4),.08)
     }

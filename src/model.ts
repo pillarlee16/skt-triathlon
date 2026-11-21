@@ -2,6 +2,11 @@ export const sports = ['swimming', 'cycling', 'running'] as const
 export type Sport = typeof sports[number]
 export const labels = {swimming:'수영', cycling:'사이클', running:'달리기'}
 export const audioSlots = ['opening','countdown','start','bgm','item','obstacle','pass','finish','podium'] as const
+export const countdownMs = 3000
+export const startLeadMs = 2500
+export const podiumLeadMs = 1000
+export const podiumIntervalMs = 3000
+export const podiumHoldMs = 1000
 export type Mode = 'live' | 'rehearsal'
 export type Person = {id:string; name:string; team:string; photo:string; active:boolean; color?:string}
 export type Asset = {id:string; name:string; kind:'image'|'audio'}
@@ -15,11 +20,14 @@ export type Winner = {id:string; name:string; prize:string; image:string}
 export type Race = {
   id:string; sport:Sport; seed:number; startsAt:number; endsAt:number
   winners:Winner[]; podiumAt?:number; completedAt?:number
-  invalidated?:{at:number; reason:string}
+  invalidated?:{at:number; reason:string; redrawId?:string}
+  redrawId?:string
+  createdAt?:number
+  eligibleCount?:number
 }
 export type State = {
   revision:number; mode:Mode; people:Person[]; prizes:Record<Sport,Prize>; assets:Asset[]
-  config:Config; races:Race[]; ready?:{id:string; sport:Sport}
+  config:Config; races:Race[]; ready?:{id:string; sport:Sport; redrawId?:string}
   current?:string; pairing?:{hash:string; expires:number; readyId:string; used?:boolean}
   locked:boolean; volume:{bgm:number; sfx:number; muted:boolean}
   requests:Record<string,number>
@@ -42,13 +50,15 @@ export function initial(mode:Mode):State {
       team:['블루','오렌지','바이올렛'][i%3], photo:'', active:true
     })) : [], assets:[],
     prizes:{swimming:{name:rehearsal?'아쿠아 기프트':'',image:''},cycling:{name:rehearsal?'라이드 기프트':'',image:''},running:{name:rehearsal?'피니시 기프트':'',image:''}},
-    config:{title:'SKT 철인3종 럭키드로우', names:{...labels}, duration:{swimming:45,cycling:45,running:45},
+    config:{title:'SKT 철인3종 럭키드로우', names:{...labels}, duration:{swimming:40,cycling:40,running:40},
       captions:{swimming:'대형 파도! 선두권 대혼전',cycling:'트랙 장애물! 부스터 발동',running:'허들을 넘어 막판 스퍼트'},
       logo:'',starter:'',audio:{}},
     races:[],locked:false,volume:{bgm:.35,sfx:.7,muted:false},requests:{}
   }
 }
 export const currentRace = (s:Pick<State,'races'|'current'>) => s.races.find(r=>r.id===s.current && !r.invalidated)
+export const podiumReadyAt = (race:Race) => (race.podiumAt??Infinity)+2*podiumIntervalMs+podiumHoldMs
+export const podiumRevealed = (race:Race,now:number) => Math.max(0,Math.min(3,1+Math.floor((now-(race.podiumAt??Infinity))/podiumIntervalMs)))
 export function stage(s:Pick<State,'races'|'current'|'ready'>, now:number) {
   const race = currentRace(s)
   if (race) {

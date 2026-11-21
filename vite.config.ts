@@ -2,7 +2,7 @@ import {defineConfig} from 'vite'
 import {Readable} from 'node:stream'
 
 export default defineConfig({
-  server:{host:'127.0.0.1'},
+  server:{host:'127.0.0.1',watch:{ignored:['**/.local/**','**/.playwright-cli/**','**/output/playwright/**','**/dist/**']}},
   plugins:[{
     name:'local-rehearsal-api',
     configureServer(server) {

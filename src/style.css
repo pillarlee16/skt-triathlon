@@ -494,7 +494,8 @@ th {
 
 .leaderboard ol {
   margin: .35rem 0 0;
-  padding-left: 1.65rem;
+  padding-left: 0;
+  list-style-position: inside;
 }
 
 .leaderboard li {
@@ -508,6 +509,8 @@ th {
 .leaderboard li::marker {
   color: var(--cyan);
 }
+.leaderboard p { margin: .4rem 0 0; font-size: clamp(1rem,1.7vw,2rem); font-weight: 800; }
+.leaderboard li img { width: 1.15em; height: 1.15em; object-fit: cover; border-radius: 50%; margin-right: .35em; vertical-align: middle; }
 
 .race-meter {
   position: absolute;
@@ -555,6 +558,23 @@ th {
   font-size: clamp(1.5rem,4vw,4.5rem);
   margin: .45rem 0 1rem;
 }
+.podium-3d {
+  align-content: end;
+  background: linear-gradient(transparent 52%,#171329 96%);
+  padding-bottom: 7vh;
+}
+.podium-3d h1 {
+  position: absolute;
+  right: 3vw;
+  top: 4vh;
+  margin: 0;
+  padding: .45em .7em;
+  background: #15132bea;
+  font-size: clamp(.9rem,2.3vw,2.8rem);
+}
+.podium-3d .place { min-height: 15vh; }
+.podium-3d .winner-face { display: none; }
+.podium-3d .prize { max-height: 4vh; }
 
 .podium-grid {
   width: min(82vw,68rem);

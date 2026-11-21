@@ -17,7 +17,8 @@ export function position(r:Runner,t:number) {
   const u=Math.max(0,t)
   const change=Math.sin(u*Math.PI)*(.12*(r.noise-.5))+
     Math.sin(u*Math.PI*2)*(.095*Math.sin(r.lane*7.13))-
-    .085*Math.exp(-((u-.48)**2)/.005)*(r.lane%4===0?1:0)
+    .085*Math.exp(-((u-.48)**2)/.005)*(r.lane%4===0?1:0)+
+    .11*Math.exp(-((u-.59)**2)/.004)*(r.lane%7===2?1:0)
   const gate=Math.max(0,1-u/.9)
   return Math.min(u<finish?.9999:1.10, u/finish + change*gate)
 }

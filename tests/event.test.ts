@@ -9,7 +9,9 @@ const post=(op:string,body:unknown,headers:Record<string,string>={})=>eventApi.f
 }))
 const state=(cookie:string,op='state')=>eventApi.fetch(new Request(url(op),{headers:{cookie}}))
 
-test('authenticated rehearsal accepts only one competing START and retries the same request',async()=>{
+test('authenticated rehearsal commits START and NEXT once, including delayed retries',async t=>{
+  let now=Date.now()
+  t.mock.method(Date,'now',()=>now)
   assert.equal((await state('')).status,401)
   assert.equal((await eventApi.fetch(new Request(url('state','live')))).status,403)
   const login=await post('login',{password:'rehearsal'})
@@ -35,7 +37,19 @@ test('authenticated rehearsal accepts only one competing START and retries the s
   const display=await (await eventApi.fetch(displayRequest)).json()
   assert.equal(display.current,before.current)
   assert.equal(display.races[0].winners.length,3)
-  assert.equal((await command('emergency',3)).status,200)
+  const revision=display.revision
+  const nextId=randomUUID()
+  const next=()=>post('action',{type:'next'},{cookie,'x-revision':String(revision),'x-request-id':nextId})
+  assert.equal((await next()).status,400)
+  now=display.races[0].endsAt
+  const podium=await (await next()).json()
+  assert.equal(podium.state.revision,4)
+  assert.deepEqual(podium.state.races[0].winners,display.races[0].winners)
+  assert.equal((await command('next',4)).status,400)
+  now=podium.state.races[0].podiumAt+10000
+  assert.equal((await (await next()).json()).state.revision,4)
+  assert.equal((await command('next',4)).status,200)
+  assert.equal((await (await next()).json()).state.ready.sport,'cycling')
   const after=await (await state(cookie)).json()
   assert.equal(after.races.length,1)
   assert.equal(after.races[0].winners.length,3)

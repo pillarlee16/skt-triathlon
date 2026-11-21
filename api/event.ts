@@ -105,7 +105,7 @@ export default {async fetch(request:Request):Promise<Response> {
     const etag=willWrite && !local ? await stateWriteTag(mode) : undefined
     const state=await read(mode)
     if(op==='tablet' && request.method==='GET') return json({enabled:tabletAllowed(state,request,now)})
-    if(op==='state' && request.method==='GET') return json(projection(state,now,url.searchParams.get('view')==='display'))
+    if(op==='state' && request.method==='GET') return json(projection(state,Date.now(),url.searchParams.get('view')==='display'))
     if(op==='csv' && request.method==='GET') return new Response(csv(state,now),{headers:{
       ...headers,'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="'+mode+'-results.csv"'
     }})
@@ -127,7 +127,7 @@ export default {async fetch(request:Request):Promise<Response> {
       throw new Unauthorized()
     }
     const key=op==='tabletStart'?sha((request.headers.get('authorization')??'')+id).toString('hex'):id
-    if(Object.hasOwn(state.requests,key)) return json({ok:true})
+    if(Object.hasOwn(state.requests,key)) return json({ok:true,...(admin?{state:projection(state,Date.now(),false)}:{})})
     if(op!=='tabletStart' && request.headers.get('x-revision')!==String(state.revision)) throw new Conflict('client-revision')
     if(!local && !etag && state.revision>0) throw new Conflict('blob-created-during-read')
     let action:Action
@@ -152,7 +152,7 @@ export default {async fetch(request:Request):Promise<Response> {
         action={type:'arm',hash:sha(token).toString('hex'),expires:now+30*60*1000}
       }
     }
-    const next=apply(state,action,now)
+    const next=apply(state,action,Date.now())
     next.revision++
     next.requests[key]=next.revision
     if(upload) {
@@ -164,8 +164,7 @@ export default {async fetch(request:Request):Promise<Response> {
       }
     }
     await write(next,etag)
-    if(token) return json({ok:true,token})
-    return json({ok:true})
+    return json({ok:true,token,...(admin?{state:projection(next,Date.now(),false)}:{})})
   } catch(error) {
     if(error instanceof Unauthorized) return json({error:'로그인 또는 유효한 시작 링크가 필요합니다.'},401)
     if(error instanceof RuleError || error instanceof SyntaxError) return json({error:error.message},400)

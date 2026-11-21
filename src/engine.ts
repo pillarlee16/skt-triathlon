@@ -1,5 +1,5 @@
 import {randomInt, randomUUID} from 'node:crypto'
-import {currentRace, findAsset, initial, sports, audioSlots, type Action, type State, type Race, type Sport} from './model.js'
+import {currentRace, findAsset, initial, sports, audioSlots, countdownMs, startLeadMs, podiumLeadMs, podiumReadyAt, type Action, type State, type Race, type Sport} from './model.js'
 
 export class RuleError extends Error {}
 const requireRule: (ok:unknown, message:string)=>asserts ok = (ok,message)=>{
@@ -19,6 +19,7 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       requireRule(!race,'현재 경기를 먼저 마무리하세요.')
       const completed = s.races.filter(r=>r.completedAt && !r.invalidated)
       requireRule(sports[completed.length]===action.sport,'수영, 사이클, 달리기 순서로 진행하세요.')
+      requireRule(!s.ready,'이미 준비된 경기입니다.')
       requireRule(s.people.filter(p=>p.active).length>=9,'참가자가 9명 이상 필요합니다.')
       requireRule(sports.every(k=>s.prizes[k].name.trim()),'세 종목 상품을 모두 등록하세요.')
       s.ready={id:randomUUID(),sport:action.sport}
@@ -30,7 +31,7 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       if (race && action.type==='emergency') {
         requireRule(race.podiumAt===undefined,'이미 발표 중입니다.')
         race.endsAt=Math.min(now,race.endsAt)
-        race.podiumAt=now
+        race.podiumAt=now+podiumLeadMs
         break
       }
       requireRule(!race && s.ready,'이미 시작했거나 준비된 경기가 없습니다.')
@@ -38,16 +39,17 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       const excluded = new Set(s.races.filter(r=>!r.invalidated).flatMap(r=>r.winners.map(w=>w.id)))
       const pool = s.people.filter(p=>p.active && !excluded.has(p.id))
       requireRule(pool.length>=3,'추첨 대상이 부족합니다.')
+      const eligibleCount=pool.length
       const prize=s.prizes[sport]
       const winners=Array.from({length:3},()=>{
         const [p]=pool.splice(pick(pool.length),1)
         return {id:p.id,name:p.name,prize:prize.name,image:findAsset(s,prize.image)?.id??''}
       })
       const emergency=action.type==='emergency'
-      const startsAt=emergency ? now : now+4000
-      const attempt:Race={id:randomUUID(),sport,seed:pick(2**31),startsAt,
+      const startsAt=emergency ? now : now+startLeadMs+countdownMs
+      const attempt:Race={id:randomUUID(),sport,seed:pick(2**31),startsAt,createdAt:now,redrawId:s.ready.redrawId,eligibleCount,
         endsAt:emergency ? now : startsAt+s.config.duration[sport]*1000,winners}
-      if (emergency) attempt.podiumAt=now
+      if (emergency) attempt.podiumAt=now+podiumLeadMs
       s.races.push(attempt)
       s.current=attempt.id
       s.locked=s.mode==='live'
@@ -57,31 +59,34 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
     }
     case 'next':
       requireRule(race && now>=race.endsAt,'결승 후 다음 화면으로 넘어갈 수 있습니다.')
-      if (race.podiumAt===undefined) race.podiumAt=now
+      if (race.podiumAt===undefined) race.podiumAt=now+podiumLeadMs
       else {
-        requireRule(now>=race.podiumAt+4000,'발표가 끝날 때까지 기다려 주세요.')
+        requireRule(now>=podiumReadyAt(race),'발표가 끝날 때까지 기다려 주세요.')
         race.completedAt=now
         delete s.current
+        const nextSport=sports[sports.indexOf(race.sport)+1]
+        if(nextSport) s.ready={id:randomUUID(),sport:nextSport,redrawId:race.redrawId}
       }
       break
     case 'redraw': {
       requireRule(validSport(action.sport) && nonempty(action.reason,300),'재추첨 사유를 입력하세요.')
       requireRule(s.races.some(r=>r.sport===action.sport && !r.invalidated),'재추첨할 결과가 없습니다.')
+      const redrawId=randomUUID()
       for(const r of s.races) {
         if (!r.invalidated && sports.indexOf(r.sport)>=sports.indexOf(action.sport)) {
-          r.invalidated={at:now,reason:action.reason.trim()}
+          r.invalidated={at:now,reason:action.reason.trim(),redrawId}
         }
       }
       delete s.current
       delete s.pairing
-      s.ready={id:randomUUID(),sport:action.sport}
+      s.ready={id:randomUUID(),sport:action.sport,redrawId}
       break
     }
     case 'reset':
       requireRule(s.mode==='rehearsal','리허설만 초기화할 수 있습니다.')
       return {...initial('rehearsal'),revision:s.revision,requests:s.requests}
     case 'import':
-      requireRule(!s.locked && !race,'현재 명단과 상품이 고정되어 있습니다.')
+      requireRule(!s.locked && !s.races.length,'첫 추첨 이후에는 명단과 상품을 바꿀 수 없습니다.')
       requireRule(Array.isArray(action.people) && action.people.length<=180 && action.prizes,'명단 형식이 올바르지 않습니다.')
       requireRule(action.people.every(p=>p && nonempty(p.id,30) && nonempty(p.name,80) && validText(p.team,100) &&
         validText(p.photo,200) && typeof p.active==='boolean' && (p.color===undefined || /^#[0-9a-f]{6}$/i.test(p.color))), '참가자 필드를 확인하세요.')
