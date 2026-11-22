@@ -702,7 +702,16 @@ export function createTrack(host:HTMLElement) {
     look.lerp(target,ease);camera.position.lerp(goal,ease);camera.lookAt(look)
     renderer.render(scene,camera)
   }
-  return {setup,frame, destroy(){
+  return {setup,frame,capture(target:HTMLCanvasElement){
+    const source=renderer.domElement
+    target.width=Math.min(source.width,1920)
+    target.height=Math.round(source.height*target.width/source.width)
+    const context=target.getContext('2d')
+    if(!context)return false
+    renderer.render(scene,camera)
+    context.drawImage(source,0,0,target.width,target.height)
+    return true
+  }, destroy(){
     dispose(course);dispose(players)
     for(const sky of skies.values())sky.dispose()
     stageReflection?.dispose()

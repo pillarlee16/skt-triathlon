@@ -1,5 +1,5 @@
 import {api, ApiError, assetUrl, esc, loginPanel, operatorChannel, personPhoto, poll, type TvStatus, type ViewState} from './client.ts'
-import {audioSlots, currentRace, podiumIntervalMs, podiumRevealed, podiumStartAt, stage, type Person, type Race} from './model.ts'
+import {audioSlots, countdownMs, currentRace, podiumIntervalMs, podiumRevealed, podiumStartAt, stage, type Person, type Race} from './model.ts'
 import {cuePoints, finishShotAt, position, raceBeats, trackOrder, type Beat, type Runner} from './playback.ts'
 import {assignAvatarStyles, starterStyle, type AvatarStyle} from './avatar-style.ts'
 import countdownCard from './assets/countdown-mascot.webp'
@@ -7,6 +7,7 @@ import podiumIntroCard from './assets/podium-intro.webp'
 import winnerCheer from './assets/winner-cheer.mp3'
 import podiumFanfare from './assets/podium-fanfare.mp3'
 import finishFanfare from './assets/finish-fanfare.mp3'
+import countdownSound from './assets/race-countdown.wav'
 
 type Slot=typeof audioSlots[number]
 type Music='bgm'|'ceremony'|'finishMusic'
@@ -15,16 +16,28 @@ const defaultAudio:Partial<Record<Slot,string>>={ceremony:podiumFanfare,cheer:wi
 const notes:Record<Slot,number[]>={opening:[196,247,294,392],countdown:[440],start:[523,784],bgm:[130,196,155,196,117,175,147,175],
   item:[392,523,659],obstacle:[120,85],pass:[340,480],finish:[392,494,587],podium:[392,494,587,784],ceremony:[],cheer:[],finishMusic:[]}
 const countdownHz=[1047,880,660]
+const transitionBlendMs=950
+const finishFadeMs=1400
+const ceremonyFadeMs=750
+const fade=(progress:number)=>{
+  const t=Math.max(0,Math.min(1,progress))
+  return t*t*(3-2*t)
+}
 function sound(){
   let context:AudioContext|undefined
+  const countdownBytes=fetch(countdownSound).then(response=>response.ok?response.arrayBuffer():null).catch(()=>null)
+  let countdownBuffer:AudioBuffer|null|undefined
+  let countdownSource:AudioBufferSourceNode|undefined
+  let countdownGain:GainNode|undefined
   let files:Partial<Record<Slot,HTMLAudioElement>>={}
   let mix={bgm:.35,sfx:.7,muted:false}
   let loop:number|undefined
   let music:Music|undefined
   let musicStarted=false
+  let musicEnvelope=1
   let notesIndex=0
   function play(type:Slot,sport?:Race['sport'],countdownStep?:number) {
-    const level=mix.muted?0:isMusic(type)?mix.bgm:mix.sfx
+    const level=mix.muted?0:isMusic(type)?mix.bgm*musicEnvelope:mix.sfx
     if(context?.state!=='running'||!level)return false
     const audio=files[type]
     if(audio){
@@ -61,14 +74,53 @@ function sound(){
     music=undefined
     musicStarted=false
   }
+  function stopStartSequence(){
+    countdownSource?.stop()
+    countdownSource=undefined
+    countdownGain=undefined
+  }
+  const usesSeparateStartCues=()=>Boolean(files.countdown||files.start||countdownBuffer===null)
   return {
     play,
+    usesSeparateStartCues,
     stopCountdown(){files.countdown?.pause()},
+    stopStartSequence,
+    startSequence(elapsed:number){
+      if(!countdownBuffer||context?.state!=='running'||mix.muted||!mix.sfx)return false
+      const source=context.createBufferSource()
+      const gain=context.createGain()
+      source.buffer=countdownBuffer
+      gain.gain.value=mix.sfx
+      source.connect(gain).connect(context.destination)
+      countdownSource=source
+      countdownGain=gain
+      source.onended=()=>{
+        source.disconnect()
+        gain.disconnect()
+        if(countdownSource===source){countdownSource=undefined;countdownGain=undefined}
+      }
+      source.start(0,elapsed<.06?0:elapsed)
+      return true
+    },
     stop(){
       stopMusic()
+      stopStartSequence()
       for(const audio of Object.values(files))audio.pause()
+      if(context){
+        context.onstatechange=null
+        void context.close()
+      }
     },
-    async enable(){context??=new AudioContext();await context.resume()},
+    enable(onState:(playing:boolean)=>void){
+      if(!context){
+        const audioContext=context=new AudioContext()
+        audioContext.onstatechange=()=>onState(audioContext.state==='running')
+        void countdownBytes.then(bytes=>bytes?audioContext.decodeAudioData(bytes):null)
+          .then(buffer=>{countdownBuffer=buffer},()=>{countdownBuffer=null})
+      }
+      onState(context.state==='running')
+      if(context.state!=='running')void context.resume().catch(()=>{})
+    },
     setup(s:ViewState){
       const next:typeof files={}
       for(const slot of audioSlots){
@@ -81,9 +133,11 @@ function sound(){
       for(const slot of audioSlots)if(next[slot]!==files[slot])files[slot]?.pause()
       files=next
     },
-    update(s:ViewState,nextMusic:Music|undefined){
+    update(s:ViewState,nextMusic:Music|undefined,envelope:number){
       mix=s.volume
-      for(const slot of audioSlots)if(files[slot])files[slot]!.volume=mix.muted?0:isMusic(slot)?mix.bgm:mix.sfx
+      musicEnvelope=envelope
+      if(countdownGain)countdownGain.gain.value=mix.muted?0:mix.sfx
+      for(const slot of audioSlots)if(files[slot])files[slot]!.volume=mix.muted?0:isMusic(slot)?mix.bgm*musicEnvelope:mix.sfx
       if(music!==nextMusic){
         if(music==='ceremony'){files.cheer?.pause();files.podium?.pause()}
         stopMusic()
@@ -107,8 +161,9 @@ export function display(app:HTMLElement) {
   let generation=0
   function connect(){
     stop();const instance=++generation
-    app.innerHTML='<section class="broadcast"><div id="track" aria-hidden="true"></div><header class="broadcast-head"></header><div id="signal" role="status"></div><div id="overlay"></div><footer class="broadcast-tools"><button id="audio">음향 켜기</button><button id="full">전체 화면</button></footer></section>'
+    app.innerHTML='<section class="broadcast"><div id="track" aria-hidden="true"></div><canvas class="finish-frame" aria-hidden="true" hidden></canvas><header class="broadcast-head"></header><div id="signal" role="status"></div><div id="overlay"></div><footer class="broadcast-tools"><button id="full">전체 화면</button></footer></section>'
     const host=app.querySelector<HTMLElement>('#track')!
+    const finishFrame=app.querySelector<HTMLCanvasElement>('.finish-frame')!
     const head=app.querySelector<HTMLElement>('.broadcast-head')!
     const overlay=app.querySelector<HTMLElement>('#overlay')!
     const signal=app.querySelector<HTMLElement>('#signal')!
@@ -121,7 +176,7 @@ export function display(app:HTMLElement) {
     let track:ReturnType<typeof import('./track.ts')['createTrack']>|undefined
     let needSetup=true
     let graphicsLost=false
-    const fallback=(reason:string)=>{graphicsLost=true;tv.graphics='html';tv.graphicsIssue=reason;host.hidden=true;report()}
+    const fallback=(reason:string)=>{graphicsLost=true;tv.graphics='html';tv.graphicsIssue=reason;host.hidden=true;finishFrame.hidden=true;report()}
     host.addEventListener('webglcontextlost',event=>{
       event.preventDefault()
       fallback('WebGL 연결 끊김')
@@ -135,19 +190,25 @@ export function display(app:HTMLElement) {
       if(instance!==generation)return
       try {track=m.createTrack(host);needSetup=true;tv.graphics='3d';report()}catch{fallback('WebGL 초기화 실패')}
     }).catch(()=>{if(instance===generation)fallback('3D 화면 로드 실패')})
-    const audioButton=app.querySelector<HTMLButtonElement>('#audio')!
-    audioButton.onclick=()=>void audio.enable().then(()=>{audioButton.textContent='음향 준비 완료';audioButton.disabled=true;tv.audio=true;report()},()=>{audioButton.textContent='음향 다시 연결'})
+    const enableAudio=()=>audio.enable(playing=>{
+      if(instance===generation&&tv.audio!==playing){tv.audio=playing;report()}
+    })
+    window.addEventListener('click',enableAudio,true)
+    window.addEventListener('keydown',enableAudio,true)
+    enableAudio()
     const full=app.querySelector<HTMLButtonElement>('#full')!
     full.onclick=()=>{if(document.fullscreenElement)void document.exitFullscreen();else void app.requestFullscreen?.().catch(()=>{signal.textContent='브라우저 전체 화면을 사용하세요.'})}
     let state:ViewState|undefined
     let offset=0
     let lastNow=0
     let lastKey=''
+    let renderedRace=''
     let lastMarkup=''
     let soundStage=''
     let soundRace=''
     let marker=-1
     let countdownPlayed=0
+    let startSequencePlayed=false
     let lastLeader=''
     let beats:Beat[]=[]
     let playedBeat=-1
@@ -178,18 +239,34 @@ export function display(app:HTMLElement) {
       const race=currentRace(s)
       const p=stage(s,now)
       const sport=race?.sport??s.ready?.sport??'swimming'
+      const podiumAt=race?podiumStartAt(race):undefined
+      const untilPodium=podiumAt===undefined?Infinity:podiumAt-now
+      const blending=p==='transition'&&untilPodium<=transitionBlendMs
+      const podiumScene=p==='podium'||blending
+      if(!blending)finishFrame.hidden=true
+      else finishFrame.style.opacity=String(fade(untilPodium/transitionBlendMs))
+      if(p==='transition'&&race){
+        const introOpacity=fade((now-race.endsAt)/420)*fade(untilPodium/360)
+        overlay.style.setProperty('--podium-intro-opacity',String(introOpacity))
+      }
       const starter=race?.sport==='swimming'&&p==='countdown'
-      const key=[sport,race?.id??s.ready?.id??'idle',starter,p==='podium',rosterKey].join('|')
+      const key=[sport,race?.id??s.ready?.id??'idle',starter,podiumScene,rosterKey].join('|')
       if(key!==lastKey||needSetup){
         const list=s.people.filter(x=>x.active)
         if(starter)list.unshift({id:'START',name:'사장님',team:'',photo:s.config.starter,active:true,color:'#f43a65'})
         const timeline:Race=race??{id:'ready',sport,seed:0,startsAt:0,endsAt:1,winners:[]}
         runners=trackOrder(list,timeline)
-        beats=cuePoints(sport,runners)
-        const artwork=loaded.get(assetUrl(s,(p==='podium'?s.config.podiumBackdrop:s.config.stadiumAd)??''))
-        try {if(!graphicsLost)track?.setup(sport,p==='podium'?runners.slice(0,3):runners,
-          person=>loaded.get(personPhoto(s,person)),appearance,p==='podium',artwork)}
+        beats=podiumScene?[]:cuePoints(sport,runners)
+        const artwork=loaded.get(assetUrl(s,(podiumScene?s.config.podiumBackdrop:s.config.stadiumAd)??''))
+        try {
+          if(!graphicsLost&&track){
+            if(blending&&race?.id===renderedRace)finishFrame.hidden=!track.capture(finishFrame)
+            track.setup(sport,podiumScene?runners.slice(0,3):runners,
+              person=>loaded.get(personPhoto(s,person)),appearance,podiumScene,artwork)
+          }
+        }
         catch{fallback('3D 경기장 구성 실패')}
+        renderedRace=''
         lastKey=key;needSetup=false;ranking=[]
       }
       const raceTime=p==='transition'?now:Math.min(now,race?.endsAt??now)
@@ -199,27 +276,30 @@ export function display(app:HTMLElement) {
       const shot=progress>=finishShotAt?'finish':beat?'event':progress>=.15?'leader':'wide'
       const ranked=runners.map(r=>({r,p:position(r,progress)})).sort((a,b)=>b.p-a.p||a.r.rank-b.r.rank)
       const revealed=p==='podium'&&race?podiumRevealed(race,now):0
-      const podiumAt=race?podiumStartAt(race):undefined
       const podiumAge=revealed&&podiumAt!==undefined?(now-podiumAt-(revealed-1)*podiumIntervalMs)/1000:Infinity
-      const transitionVeil=p==='transition'&&podiumAt!==undefined?Math.max(0,1-(podiumAt-now)/420):
-        p==='podium'&&race?.transitionMs&&race.podiumAt===undefined&&podiumAt!==undefined?Math.max(0,1-(now-podiumAt)/420):0
-      const veil=overlay.parentElement!
-      veil.style.setProperty('--podium-veil',String(transitionVeil))
       if(!graphicsLost&&p!=='complete'){
-        try {track?.frame(progress,time/1000,p==='podium'?'podium':shot,ranked.slice(0,6).map(x=>x.r),
-          starter,revealed,beat,podiumAge,ranked[Math.min(17,ranked.length-1)]?.p)}
+        try {
+          track?.frame(progress,time/1000,podiumScene?'podium':shot,ranked.slice(0,6).map(x=>x.r),
+            starter,revealed,beat,podiumAge,ranked[Math.min(17,ranked.length-1)]?.p)
+          if(track&&!podiumScene)renderedRace=race?.id??''
+        }
         catch{fallback('3D 프레임 그리기 실패')}
       }
-      if(soundRace!==(race?.id??'')){marker=-1;countdownPlayed=0;soundRace=race?.id??'';lastLeader='';lastPass=0;playedBeat=-1}
+      if(soundRace!==(race?.id??'')){
+        audio.stopStartSequence()
+        marker=-1;countdownPlayed=0;startSequencePlayed=false;soundRace=race?.id??'';lastLeader='';lastPass=0;playedBeat=-1
+      }
       const cue=p+'|'+(race?.id??s.ready?.id??'')
       if(soundStage!==cue){
         soundStage=cue
         if(p!=='countdown')audio.stopCountdown()
+        if(p!=='countdown'&&p!=='racing')audio.stopStartSequence()
         if(p==='ready')audio.play('opening')
-        if(p==='racing'&&race&&now-race.startsAt<700)audio.play('start')
         if(p==='podium'&&race&&race.podiumAt===undefined&&!race.transitionMs&&now-race.endsAt<700)audio.play('finish')
       }
-      audio.update(s,p==='racing'?'bgm':p==='transition'?'finishMusic':p==='podium'&&revealed>0?'ceremony':undefined)
+      const musicEnvelope=p==='transition'?fade(untilPodium/finishFadeMs):
+        p==='podium'?fade(-untilPodium/ceremonyFadeMs):1
+      audio.update(s,p==='racing'?'bgm':p==='transition'?'finishMusic':p==='podium'&&revealed>0?'ceremony':undefined,musicEnvelope)
       if(p==='racing'&&beat&&event&&beat.index>playedBeat&&progress>=beat.at){
         playedBeat=beat.index
         if((progress-beat.at)*(race!.endsAt-race!.startsAt)<700)audio.play(event.sound,sport)
@@ -227,7 +307,7 @@ export function display(app:HTMLElement) {
       const leader=ranked[0]?.r.person.id??''
       if(p==='racing'&&!event&&shot!=='finish'&&lastLeader&&lastLeader!==leader&&now-lastPass>2800){lastPass=now;audio.play('pass')}
       lastLeader=leader
-      if(time-lastHud<90)return
+      if(time-lastHud<90&&p!=='countdown'&&overlay.dataset.stage!=='countdown')return
       lastHud=time
       overlay.dataset.stage=p
       overlay.dataset.sport=sport
@@ -237,6 +317,12 @@ export function display(app:HTMLElement) {
       overlay.dataset.graphics=tv.graphics
       overlay.dataset.shot=p==='racing'?shot:p
       overlay.dataset.runners=String(p==='racing'&&tv.graphics==='3d'?runners.length:0)
+      const startSequenceElapsed=race?(now-race.startsAt+countdownMs)/1000:-1
+      if(!startSequencePlayed&&(p==='countdown'||p==='racing')&&startSequenceElapsed>=0&&startSequenceElapsed<3.7){
+        startSequencePlayed=audio.usesSeparateStartCues()
+          ?p==='racing'&&audio.play('start')
+          :audio.startSequence(startSequenceElapsed)
+      }
       if(p==='countdown'){
         const count=Math.ceil(((race?.startsAt??now)-now)/1000)
         if(count>=1&&count<=3){
@@ -245,7 +331,7 @@ export function display(app:HTMLElement) {
             marker=count
             overlay.querySelector('.count')!.textContent=String(count)
           }
-          if(count!==countdownPlayed&&audio.play('countdown',undefined,count))countdownPlayed=count
+          if(count!==countdownPlayed&&audio.usesSeparateStartCues()&&audio.play('countdown',undefined,count))countdownPlayed=count
         }else setMarkup('')
       }else if(p==='racing'){
         if(!ranking.length||time-lastRanking>=600){ranking=ranked.slice(0,10).map(({r})=>r);lastRanking=time}
@@ -305,7 +391,14 @@ export function display(app:HTMLElement) {
       if(error instanceof ApiError&&error.status===401){stop();loginPanel(app,connect)}
       else {tv.online=false;report()}
     },true)
-    stop=()=>{cancel();clearInterval(heartbeat);window.removeEventListener('pagehide',closed);closed();generation++;cancelAnimationFrame(tick);audio.stop();track?.destroy()}
+    stop=()=>{
+      cancel()
+      clearInterval(heartbeat)
+      window.removeEventListener('pagehide',closed)
+      window.removeEventListener('click',enableAudio,true)
+      window.removeEventListener('keydown',enableAudio,true)
+      closed();generation++;cancelAnimationFrame(tick);audio.stop();track?.destroy()
+    }
   }
   connect()
 }

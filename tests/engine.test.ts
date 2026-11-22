@@ -29,10 +29,10 @@ test('90, 87, 84 eligible, nine unique winners, official CSV',()=>{
     assert.equal(stage(s,race.endsAt),'transition')
     const announced=race
     const at=podiumStartAt(race)
-    assert.equal(at-race.endsAt,5000)
+    assert.equal(at-race.endsAt,8000)
     assert.equal(stage(s,at-1),'transition')
     assert.equal(stage(s,at),'podium')
-    assert.ok(runners.every(runner=>position(runner,1+4999/30000)>position(runner,1+4000/30000)))
+    assert.ok(runners.every(runner=>position(runner,1+7999/30000)>position(runner,1+7000/30000)))
     assert.deepEqual([at-1,at,at+podiumIntervalMs,at+2*podiumIntervalMs].map(now=>podiumRevealed(announced,now)),[0,1,2,3])
     assert.throws(()=>apply(s,{type:'next'},podiumReadyAt(announced)-1))
     s=apply(s,{type:'next'},podiumReadyAt(announced))

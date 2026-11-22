@@ -38,7 +38,7 @@ export function admin(app:HTMLElement) {
       !tv.online?'재연결 중 · TV 창을 확인하세요.':
       tv.revision<state.revision?'새 화면을 TV에 반영 중입니다.':
       (tv.graphics==='3d'?'연결됨':tv.graphics==='html'?'대체 화면 연결됨'+(tv.graphicsIssue?' ('+tv.graphicsIssue+')':''):'연결됨 · 화면 준비 중')+' · '+
-      (tv.audio?'음향 준비 완료':'TV 창에서 음향 켜기를 누르세요.')
+      (tv.audio?'음향 준비 완료':'TV 창을 한 번 클릭해 음향을 시작하세요.')
     if(reports.length>1)label.textContent+=' · 열린 TV 창 '+reports.length+'개'
   }
   operatorChannel.addEventListener('message',event=>{
@@ -168,7 +168,7 @@ export function admin(app:HTMLElement) {
       (!locked?folder('settings','방송 설정',settings):'')
     const operations=summary+control+(s.races.some(attempt=>s.now>=attempt.endsAt)?folder('history','결과 및 복구',(p==='complete'?'':csvLink)+history):'')
     const tvPanel=selected==='operate'&&p!=='complete'?'<section class="panel operation-tv"><div><h2>TV 송출</h2><p id="tv-status"></p>'+
-      (p==='ready'?'<p>TV 창의 <strong>음향 켜기</strong>와 <strong>전체 화면</strong>을 누르세요.</p>':'')+
+      (p==='ready'?'<p>TV 창에서 <strong>전체 화면</strong>을 누르세요.</p>':'')+
       '</div><a class="button" href="/display" target="triathlon-display">TV 송출 열기</a></section>':''
     app.innerHTML='<div class="admin prep-admin"><header><h1>철인3종 운영 콘솔</h1>'+
       '<a class="button" href="/start" target="_blank" rel="noopener">태블릿 리모컨 열기</a></header><nav aria-label="운영 단계">'+
