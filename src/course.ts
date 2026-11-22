@@ -8,7 +8,7 @@ import {contactTexture} from './avatar.ts'
 import {addCourseProps} from './course-props.ts'
 import {finishPool,finishShop,finishStands} from './venue-finish.ts'
 
-export const world=118
+export const world=160
 export const courseColors={
   swimming:{sky:0x7bcef4,horizon:0xd7f4ec,ground:0xf4dfb3,road:0x2dafcb,line:0xeafffa,accent:0x287ec5},
   cycling:{sky:0x8cbbec,horizon:0xe6ecfd,ground:0xc2beb6,road:0x4a5469,line:0xfff3c9,accent:0x7356b9},
@@ -220,19 +220,20 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
         const dryDeck=ribbon(side*13.87,side*17.15,.073,0xf1d5a7)
         matteSurface(dryDeck.material,14,.22)
         matteSurface(ribbon(side*17.14,side*37,.037,0xf0dab1).material,12,.17)
-        for(let tile=0;tile<128;tile++){
+        for(let tile=0;tile<Math.ceil((world+10)/1.01);tile++){
           const z=5-tile*1.01
           const color=tile%7===0?0xa2d3cf:tile%2?0x62acb4:0x74b8bf
           box(color,side*11.486,.075,z,.045,.096,.972)
         }
-        for(let joint=0;joint<62;joint++){
+        for(let joint=0;joint<Math.ceil((world+8)/2.06);joint++){
           const z=4-joint*2.06
           box(0xd8bd9c,side*11.81,.200,z,.51,.011,.022)
           box(0xbdab96,side*15.48,.079,z,3.12,.009,.032)
           box(0xd9bea0,side*26.65,.043,z,18.98,.009,.024)
         }
-        for(let i=0;i<29;i++){
-          const p=at(i/28,side*12.22)
+        const drains=Math.ceil(world/4.2)
+        for(let i=0;i<=drains;i++){
+          const p=at(i/drains,side*12.22)
           box(0x998e82,p.x,.075,p.z,.16,.025,1.65)
           for(let bar=0;bar<6;bar++)box(0xebdbc4,p.x,.092,p.z+(bar-2.5)*.23,.17,.023,.065)
         }
@@ -289,8 +290,9 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
       for(let column=-9;column<=9;column+=3){
         ribbon(column-.06,column+.06,.011,0x4499bd)
         ribbon(column+1.466,column+1.534,.058,column===0?0xe2b96c:0x9bd4d6)
-        for(let i=0;i<66;i++){
-          const {x,z}=at(i/65,column+1.5)
+        const floats=Math.ceil(world/1.8)
+        for(let i=0;i<=floats;i++){
+          const {x,z}=at(i/floats,column+1.5)
           const accent=column===0?0xf3bf58:column<0?0x60b0bb:0x92bde8
           ball(i%5<2?0xfff4db:accent,x,.10,z,.18,.15,.32)
         }
@@ -379,18 +381,19 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
     }else if(sport==='cycling'){
       matteSurface(surface.material,14,.34)
       surface.material.roughness=.89
-      shopSigns(group,at)
+      const streetSections=Math.round(world/2.36)
+      shopSigns(group,at,streetSections)
       const shopShells:number[][]=[]
       for(const side of [-1,1]){
         ribbon(side*.16-.055,side*.16+.055,.018,0xf7c64a)
         ribbon(side*11.14-.06,side*11.14+.06,.018,0xf6f5ea)
-        for(let i=0;i<62;i++){
-          const u=i*.020, p=at(u,side*14.2),q=at(u+.01,side*14.2)
+        for(let z=0;z<world*1.24;z+=2.36){
+          const u=z/world, p=at(u,side*14.2),q=at(u+.01,side*14.2)
           box(0x9d908d,p.x,p.y+.066,p.z,4.05,.013,.034,0,-Math.atan2(q.x-p.x,p.z-q.z))
         }
       }
-      for(let i=0;i<50;i++){
-        const u=i/50
+      for(let i=0;i<streetSections;i++){
+        const u=i/streetSections
         for(const side of [-1,1]){
           const lane=at(u,side*5.55)
           const tangent=at(u+.003,side*5.55)
@@ -565,9 +568,10 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
         for(const dz of [-.37,0,.37])
           box(cream,p.x,.024,p.z+dz,.52,.025,.081,0,-side*.21)
       }
+      const standSections=Math.round(world/6.55)
       for(const side of [-1,1]){
-        for(let i=0;i<18;i++){
-          const u=(i+.5)/18
+        for(let i=0;i<standSections;i++){
+          const u=(i+.5)/standSections
           for(let row=0;row<6;row++){
             const p=at(u,side*(16.15+row*1.12))
             const top=.43+row*.48

@@ -1,7 +1,7 @@
 export const sports = ['swimming', 'cycling', 'running'] as const
 export type Sport = typeof sports[number]
 export const labels = {swimming:'수영', cycling:'사이클', running:'달리기'}
-export const audioSlots = ['opening','countdown','start','bgm','item','obstacle','pass','finish','podium','ceremony','cheer'] as const
+export const audioSlots = ['opening','countdown','start','bgm','item','obstacle','pass','finish','podium','ceremony','cheer','finishMusic'] as const
 export const countdownMs = 3000
 export const startLeadMs = 2500
 export const podiumLeadMs = 1000

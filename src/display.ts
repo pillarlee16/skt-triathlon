@@ -6,13 +6,14 @@ import countdownCard from './assets/countdown-mascot.webp'
 import podiumIntroCard from './assets/podium-intro.webp'
 import winnerCheer from './assets/winner-cheer.mp3'
 import podiumFanfare from './assets/podium-fanfare.mp3'
+import finishFanfare from './assets/finish-fanfare.mp3'
 
 type Slot=typeof audioSlots[number]
-type Music='bgm'|'ceremony'
-const isMusic=(slot:Slot):slot is Music=>slot==='bgm'||slot==='ceremony'
-const defaultAudio:Partial<Record<Slot,string>>={ceremony:podiumFanfare,cheer:winnerCheer}
+type Music='bgm'|'ceremony'|'finishMusic'
+const isMusic=(slot:Slot):slot is Music=>slot==='bgm'||slot==='ceremony'||slot==='finishMusic'
+const defaultAudio:Partial<Record<Slot,string>>={ceremony:podiumFanfare,cheer:winnerCheer,finishMusic:finishFanfare}
 const notes:Record<Slot,number[]>={opening:[196,247,294,392],countdown:[440],start:[523,784],bgm:[130,196,155,196,117,175,147,175],
-  item:[392,523,659],obstacle:[120,85],pass:[340,480],finish:[392,494,587],podium:[392,494,587,784],ceremony:[],cheer:[]}
+  item:[392,523,659],obstacle:[120,85],pass:[340,480],finish:[392,494,587],podium:[392,494,587,784],ceremony:[],cheer:[],finishMusic:[]}
 const countdownHz=[1047,880,660]
 function sound(){
   let context:AudioContext|undefined
@@ -24,13 +25,14 @@ function sound(){
   let notesIndex=0
   function play(type:Slot,sport?:Race['sport'],countdownStep?:number) {
     const level=mix.muted?0:isMusic(type)?mix.bgm:mix.sfx
-    if(!context || !level)return
+    if(context?.state!=='running'||!level)return false
     const audio=files[type]
     if(audio){
       audio.volume=level
       if(!isMusic(type))audio.currentTime=0
       void audio.play().catch(()=>tone(type,level,sport,countdownStep))
     }else tone(type,level,sport,countdownStep)
+    return true
   }
   function tone(type:Slot,level:number,sport?:Race['sport'],countdownStep?:number) {
     const ctx=context!
@@ -39,7 +41,7 @@ function sound(){
     sequence.forEach((hz,i)=>{
       const start=ctx.currentTime+i*.12
       const wave=ctx.createOscillator(), gain=ctx.createGain()
-      wave.frequency.value=hz;wave.type=type==='obstacle'?'triangle':'sine'
+      wave.frequency.value=hz;wave.type=type==='obstacle'||type==='countdown'?'triangle':'sine'
       if(sport&&type==='obstacle'){
         wave.frequency.setValueAtTime(hz*(sport==='swimming'?3:sport==='cycling'?1.8:1.3),start)
         wave.frequency.exponentialRampToValueAtTime(hz*.7,start+.15)
@@ -47,7 +49,8 @@ function sound(){
         wave.frequency.setValueAtTime(hz*.76,start)
         wave.frequency.exponentialRampToValueAtTime(hz*1.08,start+.12)
       }
-      gain.gain.setValueAtTime(.001,start);gain.gain.exponentialRampToValueAtTime(.13*level+.001,start+.015)
+      const peak=type==='countdown'?.26:.13
+      gain.gain.setValueAtTime(.001,start);gain.gain.exponentialRampToValueAtTime(peak*level+.001,start+.015)
       gain.gain.exponentialRampToValueAtTime(.001,start+.18);wave.connect(gain).connect(ctx.destination)
       wave.start(start);wave.stop(start+.19)
     })
@@ -60,6 +63,7 @@ function sound(){
   }
   return {
     play,
+    stopCountdown(){files.countdown?.pause()},
     stop(){
       stopMusic()
       for(const audio of Object.values(files))audio.pause()
@@ -87,10 +91,10 @@ function sound(){
         notesIndex=0
         if(music&&files[music])files[music]!.currentTime=0
       }
-      if(!music||!context||musicStarted||mix.muted||!mix.bgm)return
+      if(!music||musicStarted)return
       const slot=music
+      if(!play(slot))return
       musicStarted=true
-      play(slot)
       if(slot==='bgm'){
         loop=window.setInterval(()=>{if(!files.bgm||files.bgm.paused&&!mix.muted)play('bgm')},260)
       }
@@ -143,6 +147,7 @@ export function display(app:HTMLElement) {
     let soundStage=''
     let soundRace=''
     let marker=-1
+    let countdownPlayed=0
     let lastLeader=''
     let beats:Beat[]=[]
     let playedBeat=-1
@@ -205,15 +210,16 @@ export function display(app:HTMLElement) {
           starter,revealed,beat,podiumAge,ranked[Math.min(17,ranked.length-1)]?.p)}
         catch{fallback('3D 프레임 그리기 실패')}
       }
-      if(soundRace!==(race?.id??'')){marker=-1;soundRace=race?.id??'';lastLeader='';lastPass=0;playedBeat=-1}
+      if(soundRace!==(race?.id??'')){marker=-1;countdownPlayed=0;soundRace=race?.id??'';lastLeader='';lastPass=0;playedBeat=-1}
       const cue=p+'|'+(race?.id??s.ready?.id??'')
       if(soundStage!==cue){
         soundStage=cue
+        if(p!=='countdown')audio.stopCountdown()
         if(p==='ready')audio.play('opening')
         if(p==='racing'&&race&&now-race.startsAt<700)audio.play('start')
-        if((p==='transition'||p==='podium')&&race&&race.podiumAt===undefined&&now-race.endsAt<700)audio.play('finish')
+        if(p==='podium'&&race&&race.podiumAt===undefined&&!race.transitionMs&&now-race.endsAt<700)audio.play('finish')
       }
-      audio.update(s,p==='racing'?'bgm':p==='transition'||p==='podium'&&revealed>0?'ceremony':undefined)
+      audio.update(s,p==='racing'?'bgm':p==='transition'?'finishMusic':p==='podium'&&revealed>0?'ceremony':undefined)
       if(p==='racing'&&beat&&event&&beat.index>playedBeat&&progress>=beat.at){
         playedBeat=beat.index
         if((progress-beat.at)*(race!.endsAt-race!.startsAt)<700)audio.play(event.sound,sport)
@@ -238,8 +244,8 @@ export function display(app:HTMLElement) {
           if(count!==marker){
             marker=count
             overlay.querySelector('.count')!.textContent=String(count)
-            audio.play('countdown',undefined,count)
           }
+          if(count!==countdownPlayed&&audio.play('countdown',undefined,count))countdownPlayed=count
         }else setMarkup('')
       }else if(p==='racing'){
         if(!ranking.length||time-lastRanking>=600){ranking=ranked.slice(0,10).map(({r})=>r);lastRanking=time}
@@ -255,7 +261,7 @@ export function display(app:HTMLElement) {
           }).join('')+'</ul></div>'+
           (caption?'<div class="ticker">'+esc(caption)+'</div>':''))
       }else if(p==='transition'){
-        setMarkup('<div class="podium-intro"><div class="podium-intro-card"><img src="'+esc(podiumIntroCard)+'" alt="시상식"></div></div>')
+        setMarkup('<div class="podium-intro"><div class="podium-intro-card"><img src="'+esc(podiumIntroCard)+'" alt="Finish"></div></div>')
       }else if(p==='podium'&&race){
         if(revealed>0&&marker!==10+revealed){
           marker=10+revealed

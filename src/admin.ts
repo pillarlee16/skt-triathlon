@@ -2,7 +2,7 @@ import {api, ApiError, assetUrl, endpoint, esc, loginPanel, mutate, mutation, op
 import {audioSlots, canPrepare, preparationLocked, currentRace, labels, podiumReadyAt, sports, stage, type Action, type Config, type Sport} from './model.ts'
 
 const phase={setup:'준비 중',ready:'출발 대기',countdown:'출발 카운트다운',racing:'경주 중',transition:'시상식 전환',podium:'시상',complete:'행사 완료'}
-const audioNames=['오프닝','카운트다운','출발','경주 BGM','부스터','충돌','추월','결승','시상 효과음','시상식 BGM','1위 환호성']
+const audioNames=['오프닝','카운트다운','출발','경주 BGM','부스터','충돌','추월','결승','시상 효과음','시상식 BGM','1위 환호성','결승 BGM']
 const prepStatus=(s:ViewState,unsaved:boolean)=>{
   if(unsaved)return '변경한 이름과 상품명을 먼저 저장하세요.'
   const people=s.people.filter(p=>p.active).length

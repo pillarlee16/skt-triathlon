@@ -14,7 +14,7 @@ const tireRadius=.37
 const axleOffset=.64
 const launchDepth=42
 const launchMerge=.09
-const launchEnd=.17
+const launchEnd=.21
 const launchSpacing=1.28
 const launchZ=(distance:number)=>-world*distance+launchDepth*Math.max(0,1-distance/launchEnd)
 const lighting={
@@ -124,7 +124,7 @@ export function createTrack(host:HTMLElement) {
         hand.set(side*(.33+.05*Math.sin(time*6)),.27,-.15).applyAxisAngle(up,yaw).add(shoulder)
       }else{
         const cycle=phase+arm*Math.PI
-        const swing=moving?(swim?cycle:Math.sin(cycle)*.78):0
+        const swing=moving?(swim?cycle:Math.sin(cycle)*.89):0
         hand.set(side*(swim?.16:.13),swim?-.46:-.39,-.025).applyAxisAngle(pitch,swing)
           .applyAxisAngle(up,yaw).add(shoulder)
       }
@@ -453,7 +453,8 @@ export function createTrack(host:HTMLElement) {
     for(const hurdle of hurdles)hurdle.kick=0
     runners.forEach((r,i)=>{
       const distance=position(r,t)
-      const phase=time*(swim?8:bike?14:16)+r.lane
+      const moving=!podium&&t>0
+      const phase=time*(swim?8:bike?14:14.4)+r.lane
       const hurdle=middle?hurdles[r.lane%15]:undefined
       const delta=distance-(hurdle?.distance??gate)
       const eventWidth=hurdle ? .018 : .031
@@ -487,18 +488,19 @@ export function createTrack(host:HTMLElement) {
       const frontY=frontGround+frontLift
       const rearY=rearGround+rearLift
       const bikePitch=bike?Math.atan2(frontY-rearY,.94):0
+      const strideBob=moving&&!swim&&!bike?.065*(1-Math.cos(phase*2)):0
       const y=podium?.66+platform+podiumHeight[r.rank]+bounce:
         bike?(frontY+rearY)*.5+tireRadius+axleOffset*Math.cos(bikePitch):
-        point.y+(swim?.25:.85)+(t>0?.105*Math.abs(Math.sin(phase)):0)+(swim?.23:hurdle?.75:0)*reaction*(stumble?.68:1)
+        point.y+(swim?.25:.85)+(moving&&swim?.105*Math.abs(Math.sin(phase)):strideBob)+(swim?.23:hurdle?.75:0)*reaction*(stumble?.68:1)
       const visible=!podium||r.rank>=3-revealed
       if(swimmerWakes){
         for(let band=0;band<2;band++){
           const age=(time*1.95+r.lane*.161+band*.5)%1
-          const tail=.32+age*.86
-          const size=t>0&&t<1?.16+.21*Math.sin(age*Math.PI):0
+          const tail=.32+age*1.03
+          const size=moving?.16+.21*Math.sin(age*Math.PI):0
           matrix.position.set(x+tail*Math.sin(yaw),.035+band*.004,z+tail*Math.cos(yaw))
           matrix.rotation.set(0,yaw,0)
-          matrix.scale.set(size,1,size*1.64)
+          matrix.scale.set(size,1,size*1.9)
           matrix.updateMatrix();swimmerWakes.setMatrixAt(i*2+band,matrix.matrix)
         }
       }
@@ -508,7 +510,7 @@ export function createTrack(host:HTMLElement) {
         if(!part)return
         const wheel=bike&&(j===5||j===6||j===10||j===11)
         let [dx,dy,dz]=body[j]
-        let angle=t>0&&!podium&&j>=3&&j<=4?Math.sin(phase+(j%2)*Math.PI)*.7:0
+        let angle=moving&&swim&&j>=3&&j<=4?Math.sin(phase+(j%2)*Math.PI)*.7:0
         const wobble=j===0?stumble*.48*Math.sin(phase):0
         let swing=j>0&&j<5?angle*.13:0
         if(bike&&j===8){
@@ -520,7 +522,14 @@ export function createTrack(host:HTMLElement) {
           angle=0;swing=0
         }else if(!swim&&j>=3&&j<=4){
           dy=podium?-.41:-.54
-          if(!podium)dy+=.12*Math.max(0,Math.sin(phase+j*Math.PI))
+          if(moving){
+            const step=phase+(j===4?Math.PI:0)
+            const lift=Math.max(0,-Math.cos(step))
+            const reach=.32+surge*.09
+            dz+=reach*Math.sin(step)
+            dy+=.20*lift-strideBob
+            angle=.36*lift
+          }
         }
         if(bike&&j>0&&!wheel){
           const raisedY=dy*Math.cos(bikePitch)-dz*Math.sin(bikePitch)
@@ -529,8 +538,8 @@ export function createTrack(host:HTMLElement) {
         }
         const localZ=dz+swing
         matrix.position.set(x+dx*Math.cos(yaw)+localZ*Math.sin(yaw),wheel?(dz<0?frontY:rearY)+tireRadius:y+dy,z+localZ*Math.cos(yaw)-dx*Math.sin(yaw))
-        if(wheel)matrix.rotation.set(0,yaw+Math.PI/2,phase,'YXZ')
-        else matrix.rotation.set(j===0?(swim?-1.02:bike?-.38+bikePitch-surge*.26:-surge*.15):angle+bikePitch,
+        if(wheel)matrix.rotation.set(0,yaw+Math.PI/2,(launchDepth-z)/tireRadius,'YXZ')
+        else matrix.rotation.set(j===0?(swim?-1.02:bike?-.38+bikePitch-surge*.26:moving?-.12-surge*.15:0):angle+bikePitch,
           yaw,wobble+(j===0?side*(steering*.24+dodge*.13):0),'YXZ')
         const squash=j===0&&t>0?.065*Math.sin(phase):0
         matrix.scale.set(visible?1-squash:0,visible?1+squash:0,visible?(j===0?.85:1):0)
@@ -663,7 +672,7 @@ export function createTrack(host:HTMLElement) {
     const focus=leaders[0]
     const p=focus?Math.min(.99,position(focus,t)):0
     const {x,y,z}=coursePoint(sport,p)
-    const chaseGap=T.MathUtils.clamp((p-(chasePosition??p))*world,0,9)
+    const chaseGap=T.MathUtils.clamp((p-(chasePosition??p))*world,0,12)
     if(podium){goal.set(0,3.25,-world+14.6);target.set(0,1.13,-world+4)}
     else{
       const opening=1-T.MathUtils.smoothstep(t,0,.14)
@@ -671,10 +680,10 @@ export function createTrack(host:HTMLElement) {
         *(1-T.MathUtils.smoothstep(t,beat.at,raceBeats[sport][beat.index].end)):0
       const sprint=T.MathUtils.smoothstep(t,finishShotAt,.91)
       const approach=T.MathUtils.smoothstep(p,.86,.94)
-      const distance=15+opening*3+event*3-sprint*2
+      const distance=15+opening*3+event*4-sprint*2
       const ahead=coursePoint(sport,p+distance/world)
-      const side=5+event*(swim?3.2:4.5)-sprint
-      const height=T.MathUtils.lerp(5.5+opening*1.8+event*2.1+chaseGap*.13,4.8,approach)
+      const side=5+event*(swim?3.2:4.5)+sprint
+      const height=T.MathUtils.lerp(5.3+opening*1.8+event*2.1+chaseGap*.13,4.7,approach)
       goal.set(ahead.x+side,ahead.y+height,ahead.z)
       target.set(x+2,y+.75,z+2.1+chaseGap*.46)
       const launch=1-T.MathUtils.smoothstep(t,0,.18)

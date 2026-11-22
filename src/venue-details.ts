@@ -19,12 +19,14 @@ export function floorNumbers(group:T.Group,values:number[],x:number[],y:number,z
 }
 
 export function stadiumCanopy(group:T.Group,at:Station,side:number,box:Place){
+  const length=at(0).z-at(1).z
+  const bays=Math.round(length/5.62)
   const point=(u:number,t:number)=>{
     const p=at(u,side*(16+t*8.9))
     return new T.Vector3(p.x,5.68+Math.sin(t*Math.PI*.86)*2.55+t*.38,p.z)
   }
   const positions:number[]=[],index:number[]=[]
-  const segments=42,panels=9
+  const segments=bays*2,panels=9
   for(let i=0;i<=segments;i++)for(let j=0;j<=panels;j++){
     const p=point(i/segments,j/panels)
     positions.push(p.x,p.y,p.z)
@@ -38,7 +40,7 @@ export function stadiumCanopy(group:T.Group,at:Station,side:number,box:Place){
   geometry.setIndex(index);geometry.computeVertexNormals()
   const fabric=new T.MeshStandardMaterial({color:0xf9e9ce,side:T.DoubleSide,roughness:.59})
   fabric.onBeforeCompile=shader=>{
-    shader.uniforms.canopyPitch={value:21/(at(0).z-at(1).z)}
+    shader.uniforms.canopyPitch={value:bays/length}
     shader.vertexShader='varying vec3 roofPoint;\n'+shader.vertexShader.replace('#include <begin_vertex>',
       '#include <begin_vertex>\nroofPoint=position;')
     shader.fragmentShader='uniform float canopyPitch; varying vec3 roofPoint;\n'+shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
@@ -50,22 +52,22 @@ export function stadiumCanopy(group:T.Group,at:Station,side:number,box:Place){
     `)
   }
   group.add(new T.Mesh(geometry,fabric))
-  for(let i=0;i<=21;i++){
-    const u=i/21,p=point(u,1)
+  for(let i=0;i<=bays;i++){
+    const u=i/bays,p=point(u,1)
     box(0x538080,p.x,p.y/2,p.z,.29,p.y,.35)
     for(let j=0;j<8;j++){
       const a=point(u,j/8),b=point(u,(j+1)/8)
       box(0xc58c65,(a.x+b.x)/2,(a.y+b.y)/2-.12,a.z,a.distanceTo(b)+.055,.18,.25,0,0,Math.atan2(b.y-a.y,b.x-a.x))
       box(0xdec4aa,(a.x+b.x)/2,(a.y+b.y)/2+.047,a.z,a.distanceTo(b)+.055,.077,.14,0,0,Math.atan2(b.y-a.y,b.x-a.x))
     }
-    if(i===21)continue
-    const a=point(u,0),b=point((i+1)/21,0)
+    if(i===bays)continue
+    const a=point(u,0),b=point((i+1)/bays,0)
     box(0xf6efdc,(a.x+b.x)/2,a.y,(a.z+b.z)/2,.25,.14,a.distanceTo(b)+.04,0,
       Math.atan2(b.x-a.x,b.z-a.z))
   }
 }
 
-export function shopSigns(group:T.Group,at:Station){
+export function shopSigns(group:T.Group,at:Station,streetSections:number){
   const neighborhoods=[
     {names:['을지 인쇄','한결 제본'],base:'#475c74',ink:'#fff3d8'},
     {names:['세운 철물','청계 조명'],base:'#dfad56',ink:'#483b38'},
@@ -77,8 +79,8 @@ export function shopSigns(group:T.Group,at:Station){
     ctx.strokeStyle=ink;ctx.lineWidth=4;ctx.strokeRect(18,15,width-36,height-30)
     panelLettering(ctx,name,ink,100,height/2)
   })))
-  for(const side of [-1,1])for(let i=0;i<17;i+=2){
-    const u=i*3/50,section=u<.32?0:u<.72?1:2
+  for(const side of [-1,1])for(let i=0;i*3<streetSections;i+=2){
+    const u=i*3/streetSections,section=u<.32?0:u<.72?1:2
     const panel=artwork[section][Math.floor(i/2+Number(side===1))%2].clone()
     const p=at(u,side*16.79)
     panel.position.set(p.x,p.y+2.38,p.z)

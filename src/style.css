@@ -501,19 +501,13 @@ th {
 }
 
 .podium-intro-card {
-  position: relative;
-  width: min(57vw,104vh);
-  aspect-ratio: 1019 / 538;
-  overflow: hidden;
-  border-radius: 6.5% / 12%;
-  box-shadow: 0 .8rem 2.5rem #18122655;
+  width: min(60vw,108vh);
+  filter: drop-shadow(0 .8rem 1.2rem #18122655);
 }
 
 .podium-intro-card img {
-  position: absolute;
-  width: 164.08%;
-  left: -31.99%;
-  top: -38.1%;
+  display: block;
+  width: 100%;
 }
 
 .broadcast::after {
