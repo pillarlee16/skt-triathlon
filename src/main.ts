@@ -19,5 +19,9 @@ else if(path==='/start'){
     }finally{button.disabled=false}
   }
 }else{
-  app.innerHTML='<section class="landing"><div class="eyebrow">SKT · 2026 송년회</div><h1>철인3종<br><em>럭키드로우</em></h1><p>수영 · 사이클 · 달리기</p><div class="actions"><a href="/admin" class="button primary">관리자 열기</a></div></section>'
+  app.innerHTML='<section class="landing"><div class="eyebrow">SKT · 2026 송년회</div><h1>철인3종<br><em>럭키드로우</em></h1><p>수영 · 사이클 · 달리기</p>'+
+    '<nav class="landing-links" aria-label="행사 화면">'+
+    '<a href="/display" class="button">TV 송출 화면</a>'+
+    '<a href="/admin" class="button primary">관리자 화면</a>'+
+    '<a href="/start" class="button">START 리모컨</a></nav></section>'
 }
