@@ -29,13 +29,14 @@ export type Race = {
 export type State = {
   revision:number; mode:Mode; people:Person[]; prizes:Record<Sport,Prize>; assets:Asset[]
   config:Config; races:Race[]; ready?:{id:string; sport:Sport; redrawId?:string}
-  current?:string; pairing?:{hash:string; expires:number; readyId:string; used?:boolean}
+  current?:string
+  pairing?:{hash:string; expires:number; readyId:string; used?:boolean} // Legacy SQLite snapshots
   locked:boolean; volume:{bgm:number; sfx:number; muted:boolean}
   requests:Record<string,number>
 }
 export type Action =
   | {type:'prepare'; sport:Sport}
-  | {type:'start'|'emergency'|'next'|'disarm'}
+  | {type:'start'|'emergency'|'next'}
   | {type:'redraw'; sport:Sport; reason:string}
   | {type:'savePerson'; id?:string; name:string}
   | {type:'removePerson'; id:string}
@@ -44,7 +45,6 @@ export type Action =
   | {type:'assets'; assets:Asset[]; target?:{person:string}|{prize:Sport}}
   | {type:'removeAsset'; id:string}
   | {type:'volume'; volume:State['volume']}
-  | {type:'arm'; hash:string; expires:number}
 export function initial(mode:Mode):State {
   return {
     revision:0, mode, people:[], assets:[],

@@ -1,5 +1,5 @@
 import {findAsset,type State,type Person} from './model.ts'
-export type ViewState=Omit<State,'requests'|'pairing'|'mode'> & {now:number;tabletArmed:boolean}
+export type ViewState=Omit<State,'requests'|'pairing'|'mode'> & {now:number}
 export type TvStatus={id:string; revision:number; audio:boolean; graphics:'loading'|'3d'|'html'; online:boolean; graphicsIssue?:string}
 export const legacyMode=new URLSearchParams(location.search).get('mode')
 export const operatorChannel=new BroadcastChannel('triathlon-operator')
@@ -27,10 +27,10 @@ export async function api<T=ViewState>(op:string,options:Record<string,string>={
   if(!r.ok) throw new ApiError(r.status,body.error)
   return body
 }
-export function mutation<T=unknown>(op:string,body:BodyInit,revision:number,options:Record<string,string>={},token?:string) {
-  const headers:Record<string,string>={'x-request-id':crypto.randomUUID(),'x-revision':String(revision)}
+export function mutation<T=unknown>(op:string,body:BodyInit,revision?:number,options:Record<string,string>={}) {
+  const headers:Record<string,string>={'x-request-id':crypto.randomUUID()}
+  if(revision!==undefined) headers['x-revision']=String(revision)
   if(op!=='upload') headers['Content-Type']='application/json'
-  if(token) headers.Authorization='Bearer '+token
   const send=()=>api<T>(op,options,{method:'POST',body,headers,signal:AbortSignal.timeout(7000)})
   return ()=>send().catch(error=>{if(error instanceof ApiError && error.status!==503) throw error; return send()})
 }

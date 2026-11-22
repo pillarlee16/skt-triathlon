@@ -1,4 +1,4 @@
-import {createHash, createHmac, randomBytes, randomUUID, timingSafeEqual} from 'node:crypto'
+import {createHash, createHmac, randomUUID, timingSafeEqual} from 'node:crypto'
 import {apply, RuleError} from '../src/engine.ts'
 import {csv, currentRace, sports, type Sport, type Action, type Asset, type Mode, type State} from '../src/model.ts'
 import {openStore,type StoredFile} from './store.ts'
@@ -16,15 +16,10 @@ function isAdmin(request:Request,sign:(value:string)=>string) {
   const [expires,signature]=cookie?.split('.')??[]
   return Number(expires)>Date.now() && !!signature && safeEqual(signature,sign(expires))
 }
-function tabletAllowed(s:State, request:Request, now:number) {
-  const token=request.headers.get('authorization')?.replace(/^Bearer /,'')??''
-  return !!(s.ready && s.pairing && s.pairing.readyId===s.ready.id && s.pairing.expires>now &&
-    token && safeEqual(sha(token).toString('hex'),s.pairing.hash))
-}
 function projection(s:State, now:number, display:boolean) {
   const {pairing, requests, mode, ...publicState}=s
   const race=currentRace(s)
-  return {...publicState,now,tabletArmed:!!(pairing && pairing.expires>now),
+  return {...publicState,now,
     races: s.races.map(r=>display && r.id===race?.id || now>=r.endsAt || r.invalidated ? r : {...r,winners:[]})}
 }
 function imageType(bytes:Uint8Array) {
@@ -56,10 +51,9 @@ export function createEventApi({database,mode,password,secret,secure}:EventOptio
       const expires=String(now+12*60*60*1000)
       return json({ok:true},200,{'Set-Cookie':'tri_admin='+expires+'.'+sign(expires)+'; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200'+(secure?'; Secure':'')})
     }
-    if (!admin && op!=='tablet' && op!=='tabletStart') throw new Unauthorized()
+    if (!admin && op!=='tabletStart') throw new Unauthorized()
     if (op==='tabletStart' && request.method!=='POST') return json({error:'지원하지 않는 요청입니다.'},405)
     const state=store.read()
-    if(op==='tablet' && request.method==='GET') return json({enabled:tabletAllowed(state,request,now)})
     if(op==='state' && request.method==='GET') return json(projection(state,Date.now(),url.searchParams.get('view')==='display'))
     if(op==='csv' && request.method==='GET') return new Response(csv(state,now),{headers:{
       ...headers,'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="triathlon-results.csv"'
@@ -73,15 +67,10 @@ export function createEventApi({database,mode,password,secret,secure}:EventOptio
     if(request.method!=='POST' || !['upload','action','tabletStart'].includes(op)) return json({error:'지원하지 않는 요청입니다.'},405)
     const id=request.headers.get('x-request-id')??''
     if(!/^[0-9a-f-]{36}$/i.test(id)) return json({error:'요청 ID를 확인하세요.'},400)
-    if(op==='tabletStart' && !tabletAllowed(state,request,now)) {
-      if (Object.hasOwn(state.requests,sha((request.headers.get('authorization')??'')+id).toString('hex'))) return json({ok:true})
-      throw new Unauthorized()
-    }
-    const key=op==='tabletStart'?sha((request.headers.get('authorization')??'')+id).toString('hex'):id
+    const key=op==='tabletStart'?'tablet:'+id:id
     if(Object.hasOwn(state.requests,key)) return json({ok:true,...(admin?{state:projection(state,Date.now(),false)}:{})})
     if(op!=='tabletStart' && request.headers.get('x-revision')!==String(state.revision)) throw new Conflict('client-revision')
     let action:Action
-    let token:string|undefined
     let upload:StoredFile|undefined
     if(op==='upload') {
       const name=url.searchParams.get('name')?.trim()??''
@@ -100,18 +89,14 @@ export function createEventApi({database,mode,password,secret,secure}:EventOptio
     else {
       action=await request.json()
       if (!action || typeof action.type!=='string' || action.type==='assets') throw new RuleError('잘못된 요청입니다.')
-      if(action.type==='arm') {
-        token=randomBytes(24).toString('base64url')
-        action={type:'arm',hash:sha(token).toString('hex'),expires:now+30*60*1000}
-      }
     }
     const next=apply(state,action,Date.now())
     next.revision++
     next.requests[key]=next.revision
     if(!store.write(next,upload)) throw new Conflict('revision')
-    return json({ok:true,token,...(admin?{state:projection(next,Date.now(),false)}:{})})
+    return json({ok:true,...(admin?{state:projection(next,Date.now(),false)}:{})})
   } catch(error) {
-    if(error instanceof Unauthorized) return json({error:'로그인 또는 유효한 시작 링크가 필요합니다.'},401)
+    if(error instanceof Unauthorized) return json({error:'요청 권한을 확인하세요.'},401)
     if(error instanceof RuleError || error instanceof SyntaxError) return json({error:error.message},400)
     if(error instanceof Conflict) {
       console.info('event state conflict',op,error.message || 'local-write')

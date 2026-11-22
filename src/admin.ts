@@ -19,7 +19,6 @@ export function admin(app:HTMLElement) {
   let rosterScroll=0
   let busy=false
   let message=''
-  let pair=''
   let retry:(()=>Promise<boolean>)|undefined
   let connected=true
   const televisions=new Map<string,TvStatus & {received:number}>()
@@ -50,9 +49,9 @@ export function admin(app:HTMLElement) {
     tvStatus()
   })
   function act(action:Action) {
-    return save(action,mutation<{state:ViewState;token?:string}>('action',JSON.stringify(action),state.revision))
+    return save(action,mutation<{state:ViewState}>('action',JSON.stringify(action),state.revision))
   }
-  async function save(action:Action,send:()=>Promise<{state:ViewState;token?:string}>) {
+  async function save(action:Action,send:()=>Promise<{state:ViewState}>) {
     if(busy)return false
     busy=true
     retry=undefined
@@ -63,8 +62,6 @@ export function admin(app:HTMLElement) {
       state=result.state
       connected=true
       operatorChannel.postMessage({type:'refresh'})
-      if(result.token) pair=location.origin+'/start#'+result.token
-      else if(['start','prepare','disarm','emergency','redraw','savePerson','removePerson','prizeNames'].includes(action.type)) pair=''
       if(action.type==='prepare')screen='operate'
       if(action.type==='savePerson'){
         drafts.delete(action.id?'person:'+action.id:'new-person')
@@ -128,8 +125,6 @@ export function admin(app:HTMLElement) {
       (s.ready?'<button data-act="start" class="primary">START</button>':'')+
       (nextLabel?'<button class="primary" data-act="next" '+(p==='podium'&&!announced?'disabled':'')+'>'+esc(nextLabel)+'</button>':'')+
       '</div></section>':'')+
-      (s.ready?folder('tablet','태블릿 시작','<p><button data-act="'+(s.tabletArmed?'disarm':'arm')+'">'+(s.tabletArmed?'태블릿 비활성화':'태블릿 활성화')+'</button></p>'+
-        (pair&&s.tabletArmed?'<label>태블릿 시작 링크<input readonly value="'+esc(pair)+'"></label><button id="copy">링크 복사</button>':'')):'')+
       folder('volume','송출 음향','<form id="volume" class="form-grid"><label>BGM<input type="range" min="0" max="1" step=".05" name="bgm" value="'+s.volume.bgm+'"></label><label>효과음<input type="range" min="0" max="1" step=".05" name="sfx" value="'+s.volume.sfx+'"></label><label class="inline"><input type="checkbox" name="muted" '+(s.volume.muted?'checked':'')+'> 음소거</label><button>적용</button></form>')+
       (s.ready||r&&['countdown','racing','finish'].includes(p)?folder('emergency','비상 진행','<p><button data-act="emergency" class="danger">비상 발표</button></p>'):'')
     const data='<section class="panel prep-roster" id="prep-roster"><h2>참가자</h2>'+
@@ -175,7 +170,8 @@ export function admin(app:HTMLElement) {
     const tvPanel=selected==='operate'&&p!=='complete'?'<section class="panel operation-tv"><div><h2>TV 송출</h2><p id="tv-status"></p>'+
       (p==='ready'?'<p>TV 창의 <strong>음향 켜기</strong>와 <strong>전체 화면</strong>을 누르세요.</p>':'')+
       '</div><a class="button" href="/display" target="triathlon-display">TV 송출 열기</a></section>':''
-    app.innerHTML='<div class="admin prep-admin"><header><h1>철인3종 운영 콘솔</h1></header><nav aria-label="운영 단계">'+
+    app.innerHTML='<div class="admin prep-admin"><header><h1>철인3종 운영 콘솔</h1>'+
+      '<a class="button" href="/start" target="_blank" rel="noopener">태블릿 리모컨 열기</a></header><nav aria-label="운영 단계">'+
       '<button data-tab="prepare" aria-pressed="'+(selected==='prepare')+'">참가자 준비</button>'+
       '<button data-tab="operate" aria-pressed="'+(selected==='operate')+'" '+(!operate?'disabled':'')+'>경기 운영</button>'+
       '</nav><div class="status operation-status" data-stage="'+p+'" data-revision="'+s.revision+'" '+(!message&&!retry?'hidden':'')+'><span id="message" role="status">'+esc(message)+'</span>'+
@@ -204,7 +200,6 @@ export function admin(app:HTMLElement) {
     })
     app.querySelectorAll<HTMLButtonElement>('[data-remove]').forEach(b=>b.onclick=()=>void act({type:'removeAsset',id:b.dataset.remove!}))
     const get=<T extends HTMLElement>(selector:string)=>app.querySelector<T>(selector)
-    const copy=get<HTMLButtonElement>('#copy');if(copy)copy.onclick=()=>void navigator.clipboard.writeText(pair).then(()=>tell('링크를 복사했습니다.'),()=>tell('링크 입력란에서 직접 복사하세요.'))
     app.querySelectorAll<HTMLDetailsElement>('details[data-fold]').forEach(details=>details.ontoggle=()=>{
       if(details.open)expanded.add(details.dataset.fold!)
       else expanded.delete(details.dataset.fold!)
@@ -268,7 +263,6 @@ export function admin(app:HTMLElement) {
             if(payload.size>4_000_000)throw new Error('4 MB 이하 파일을 사용하세요.')
             const result=await mutate<{state:ViewState}>('upload',payload,state.revision,{name:file.name,...fields})
             state=result.state
-            if(target!=='general')pair=''
             operatorChannel.postMessage({type:'refresh'})
           }catch(error){
             errors.push(file.name+' '+(error as Error).message)
@@ -300,7 +294,7 @@ export function admin(app:HTMLElement) {
       const race=currentRace(newState)
       const announcement=race?podiumReadyAt(race):Infinity
       const changed=!state || !connected || newState.revision!==state.revision || stage(newState,newState.now)!==stage(state,state.now) ||
-        newState.tabletArmed!==state.tabletArmed || announcement<=newState.now && announcement>state.now
+        announcement<=newState.now && announcement>state.now
       if(!connected&&!retry)message='연결이 복구되었습니다.'
       connected=true
       state=newState

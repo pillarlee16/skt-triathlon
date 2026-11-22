@@ -23,7 +23,6 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       requireRule(s.people.filter(p=>p.active).length>=9,'참가자가 9명 이상 필요합니다.')
       requireRule(sports.every(k=>s.prizes[k].name.trim()),'세 종목 상품을 모두 등록하세요.')
       s.ready={id:randomUUID(),sport:action.sport}
-      delete s.pairing
       break
     }
     case 'start':
@@ -54,7 +53,6 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       s.current=attempt.id
       s.locked=true
       delete s.ready
-      delete s.pairing
       break
     }
     case 'next':
@@ -78,7 +76,6 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
         }
       }
       delete s.current
-      delete s.pairing
       s.ready={id:randomUUID(),sport:action.sport,redrawId}
       break
     }
@@ -102,7 +99,6 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
         }
       }
       delete s.ready
-      delete s.pairing
       break
     }
     case 'config': {
@@ -131,7 +127,6 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
           s.prizes[action.target.prize].image=asset.id
         }
         delete s.ready
-        delete s.pairing
         s.assets.push({...asset,targeted:true})
       }else s.assets.push(...action.assets)
       break
@@ -144,13 +139,6 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       requireRule(action.volume && validLevel(action.volume.bgm) && validLevel(action.volume.sfx) &&
         typeof action.volume.muted==='boolean','음향 설정이 올바르지 않습니다.')
       s.volume=action.volume
-      break
-    case 'arm':
-      requireRule(s.ready,'먼저 경기를 준비하세요.')
-      s.pairing={hash:action.hash,expires:action.expires,readyId:s.ready.id}
-      break
-    case 'disarm':
-      delete s.pairing
       break
     default: throw new RuleError('지원하지 않는 요청입니다.')
   }

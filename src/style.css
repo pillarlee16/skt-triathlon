@@ -642,6 +642,16 @@ button:focus-visible,.button:focus-visible { outline-color: #7855a4; }
   box-shadow: 0 .65rem 0 #ac668b,0 1.1rem 2.5rem #7c528452;
 }
 .tablet button:active:not(:disabled) { transform: translateY(.4rem); box-shadow: 0 .25rem 0 #ac668b; }
+.tablet { text-align: center; gap: clamp(1rem,4vh,2.5rem); }
+.tablet header { width: min(38rem,100%); }
+.tablet h1 {
+  margin: 0; padding: .3em .45em; border-radius: .45em;
+  background: #fff8ef; box-shadow: 0 .08em 0 #d5bedf,0 .16em .55em #8a69952b;
+  font-size: clamp(2rem,6vw,4rem); letter-spacing: -.06em; line-height: 1.2;
+}
+.tablet button { width: min(62vw,25rem); font-size: clamp(3rem,12vw,7rem); }
+.tablet button:disabled { opacity: .55; cursor: wait; }
+.tablet [role=status] { margin: 0; min-height: 1.5em; font-size: clamp(.9rem,2vw,1.15rem); }
 .status strong { color: #5c4083; }
 .stats>div { background: #f4ecf7; }
 label { color: #594862; }
