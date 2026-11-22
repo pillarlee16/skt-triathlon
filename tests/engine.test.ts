@@ -112,8 +112,22 @@ test('three course stories change leaders and keep a deterministic photo finish'
     const race=currentRace(apply(ready,{type:'start'},base,max=>max===2**31?seed:Math.floor(max/3)))!
     const runners=trackOrder(state.people,race)
     assert.equal(race.endsAt-race.startsAt,duration*1000)
-    const leaders=[.17,.35,.58,.79].map(t=>runners.reduce((a,b)=>position(a,t)>position(b,t)?a:b).person.id)
-    assert.equal(new Set(leaders).size,4)
+    const byPosition=(t:number)=>runners.slice().sort((a,b)=>position(b,t)-position(a,t))
+    const checkpoints=[.17,.35,.58,.79]
+    const limits=[[20,46,70],[17,44,68],[16,41,66],[12,33,62]]
+    const stages=checkpoints.map(byPosition)
+    assert.equal(new Set(stages.map(stage=>stage[0].person.id)).size,4)
+    for(const [index,stage] of stages.entries()){
+      for(const cut of limits[index]){
+        assert.ok(position(stage[cut-1],checkpoints[index])-position(stage[cut],checkpoints[index])>=.005)
+      }
+      if(index>0){
+        const oldBack=new Set(stages[index-1].slice(limits[index-1][2]))
+        assert.ok(stage.slice(0,limits[index][2]).filter(runner=>oldBack.has(runner)).length>=4)
+      }
+    }
+    const beforeSprint=new Set(stages[3].slice(0,10))
+    assert.ok(byPosition(.865).slice(0,10).filter(runner=>!beforeSprint.has(runner)).length>=2)
     const cues=cuePoints(sport,runners)
     assert.deepEqual(cues,cuePoints(sport,trackOrder(state.people,structuredClone(race))))
     for(const [i,cue] of cues.entries()){

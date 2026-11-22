@@ -1,13 +1,14 @@
 import * as T from 'three'
 import {armShape,bodyShape,contactTexture,faceBindingShape,faceSurface,faceTexture,helmetShape,helmetTexture,nameBibs,outfitTexture,shoeShape,swimGoggleShape,uniformPipingShape} from './avatar.ts'
 import type {Sport,Person} from './model.ts'
-import {position,raceBeats,type Beat,type Runner} from './playback.ts'
+import {finishShotAt,position,raceBeats,type Beat,type Runner} from './playback.ts'
 import {buildCourse,courseColors,coursePoint,world} from './course.ts'
 import {paintedPanel,panelLettering,podiumEnvironment,poolItems,rollingWave,speedBump,speedBumpHeight,skyGradient,swimmingWake} from './scenery.ts'
 import {RoundedBoxGeometry} from 'three/addons/geometries/RoundedBoxGeometry.js'
 import type {AvatarStyle} from './avatar-style.ts'
 import {styledSurface} from './avatar-material.ts'
 import {buildCostumeBatches} from './avatar-costumes.ts'
+import {cyclingProps,runningBallDistance,runningBallLane,runningProps} from './race-props.ts'
 
 const tireRadius=.37
 const axleOffset=.64
@@ -58,7 +59,9 @@ export function createTrack(host:HTMLElement) {
   const up=new T.Vector3(0,1,0), down=new T.Vector3(0,-1,0), pitch=new T.Vector3(1,0,0), roll=new T.Vector3(0,0,1)
   const shoulder=new T.Vector3(), hand=new T.Vector3(), direction=new T.Vector3()
   const gripY=-.16, gripZ=-.38
-  let hurdles:{base:T.Group;pad:T.Mesh}[]=[]
+  let hurdles:{base:T.Group;pad:T.Mesh;distance:number;kick:number}[]=[]
+  let cycleProps:ReturnType<typeof cyclingProps>|undefined
+  let stadiumProps:ReturnType<typeof runningProps>|undefined
   let bumpProfile:{x:number;z:number;sin:number;cos:number}|undefined
   let wave:ReturnType<typeof rollingWave>|undefined
   let swimmerWakes:T.InstancedMesh|undefined
@@ -66,10 +69,11 @@ export function createTrack(host:HTMLElement) {
   let itemRipples:T.InstancedMesh|undefined
   let rankPanels:T.Mesh[]=[]
   let effects:T.InstancedMesh
-  let animateCourse=(time:number)=>{void time}
+  let animateCourse:(time:number,sprinting:boolean)=>void=()=>{}
   let previousFrame=0, frameAverage=16, dpr=Math.min(devicePixelRatio,1.5)
   const target=new T.Vector3()
   let sport:Sport='running'
+  let cameraReady=false, cameraPodium=false
   let generation=0
   const goal=new T.Vector3(), look=new T.Vector3()
   function dispose(group:T.Group) {
@@ -134,9 +138,12 @@ export function createTrack(host:HTMLElement) {
   const podiumHeight=[1.15,.82,.56]
   function setup(kind:Sport,roster:Runner[],photo:(person:Person)=>HTMLImageElement|undefined,
     appearance:(person:Person)=>AvatarStyle,podium=false,art?:HTMLImageElement) {
+    if(kind!==sport||podium!==cameraPodium)cameraReady=false
+    cameraPodium=podium
     generation++; sport=kind;runners=roster
     styles=roster.map(({person})=>appearance(person))
     dispose(course);dispose(players);hurdles=[];rankPanels=[];wave=undefined;swimmerWakes=undefined;swimItems=undefined;itemRipples=undefined;bumpProfile=undefined
+    cycleProps=undefined;stadiumProps=undefined
     const swim=!podium&&sport==='swimming',bike=!podium&&sport==='cycling'
     const setting=podium?'podium':sport
     const palette=courseColors[setting]
@@ -173,6 +180,7 @@ export function createTrack(host:HTMLElement) {
       itemRipples.visible=false;itemRipples.frustumCulled=false
       itemRipples.instanceMatrix.setUsage(T.DynamicDrawUsage);course.add(itemRipples)
     }else if(bike){
+      cycleProps=cyclingProps();course.add(cycleProps.group)
       const gate=raceBeats[sport][1].gate
       const point=coursePoint(sport,gate), next=coursePoint(sport,gate+.002)
       const bump=speedBump()
@@ -181,28 +189,31 @@ export function createTrack(host:HTMLElement) {
       bumpProfile={x:point.x,z:point.z,sin:Math.sin(bump.rotation.y),cos:Math.cos(bump.rotation.y)}
       course.add(bump)
     }else if(!podium) {
-      const gate=coursePoint(sport,raceBeats[sport][1].gate)
-      const shadeGeometry=new T.PlaneGeometry(2.35,.99).rotateX(-Math.PI/2)
+      stadiumProps=runningProps();course.add(stadiumProps.group)
+      const gate=raceBeats.running[1].gate
+      const shadeGeometry=new T.PlaneGeometry(1.55,.99).rotateX(-Math.PI/2)
       const shadeMaterial=new T.MeshBasicMaterial({map:contactTexture(),transparent:true,depthWrite:false,opacity:.66})
-      for(let i=0;i<10;i++){
+      for(let i=0;i<15;i++){
+        const distance=gate+(i%2?.014:-.014)
+        const point=coursePoint('running',distance,(i-7)*1.4)
         const base=new T.Group()
-        base.position.set(gate.x-10+i*2.2,gate.y,gate.z+(i%3)*.56)
+        base.position.set(point.x,point.y,point.z)
         base.visible=false;course.add(base)
-        const pad=box(1.55,.25,.31,0,.57,0,0xf2b169)
+        const pad=box(1.14,.25,.31,0,.57,0,i%2?0xeaa37a:0xf2b169)
         base.add(pad)
         for(const side of [-1,1]){
-          pad.add(box(.045,.237,.302,side*.77,0,0,0xd98572))
-          pad.add(box(.041,.255,.315,side*.59,0,0,0xf6cc89))
-          for(const dz of [-.102,0,.102])pad.add(box(.067,.013,.024,side*.59,.127,dz,0xffe6b4))
+          pad.add(box(.045,.237,.302,side*.56,0,0,0xd98572))
+          pad.add(box(.041,.255,.315,side*.42,0,0,0xf6cc89))
+          for(const dz of [-.102,0,.102])pad.add(box(.067,.013,.024,side*.42,.127,dz,0xffe6b4))
         }
         for(const side of [-1,1]){
-          base.add(box(.16,.53,.16,side*.62,.32,0,0x6d537f))
-          base.add(box(.26,.10,.62,side*.62,.055,.05,0x625c75))
-          for(const dz of [-.21,.30])base.add(box(.29,.08,.093,side*.62,.047,dz,0x887596))
+          base.add(box(.13,.53,.16,side*.45,.32,0,0x6d537f))
+          base.add(box(.22,.10,.62,side*.45,.055,.05,0x625c75))
+          for(const dz of [-.21,.30])base.add(box(.23,.08,.093,side*.45,.047,dz,0x887596))
         }
         const shade=new T.Mesh(shadeGeometry,shadeMaterial)
         shade.position.set(.08,.02,-.09);base.add(shade)
-        hurdles.push({base,pad})
+        hurdles.push({base,pad,distance,kick:0})
       }
     }
     effects=new T.InstancedMesh(new T.SphereGeometry(.18,7,5),
@@ -362,12 +373,10 @@ export function createTrack(host:HTMLElement) {
       goggles?.setColorAt(i*2,trim)
       goggles?.setColorAt(i*2+1,trim)
     })
-    if(podium){camera.position.set(0,3.25,-world+14.6);look.set(0,1.13,-world+4)}
-    else {camera.position.set(19,19,19);look.set(0,0,-14)}
   }
   let w=0,h=0
   const laneX=(runner:Runner)=> (runner.lane%15-7)*1.4
-  function frame(t:number,time:number,shot:string,leaders:Runner[],starter=false,revealed=0,beat?:Beat,podiumAge=Infinity) {
+  function frame(t:number,time:number,shot:string,leaders:Runner[],starter=false,revealed=0,beat?:Beat,podiumAge=Infinity,chasePosition?:number) {
     if(w!==host.clientWidth||h!==host.clientHeight){
       w=host.clientWidth;h=host.clientHeight
       if(w&&h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
@@ -382,20 +391,38 @@ export function createTrack(host:HTMLElement) {
     }
     const gate=beat?raceBeats[sport][beat.index].gate:0
     const active=!podium&&beat!==undefined
-    animateCourse(time)
+    const early=active&&beat?.index===0, middle=active&&beat?.index===1, late=active&&beat?.index===2
+    const ballLane=early&&stadiumProps&&beat&&t<=beat.at+.094?runningBallLane(t,beat.at):undefined
+    animateCourse(time,late&&sport==='running')
+    cycleProps?.update(time,late)
+    stadiumProps?.update(t,time,ballLane,late)
+    for(const hurdle of hurdles)hurdle.kick=0
     runners.forEach((r,i)=>{
       const distance=position(r,t)
       const phase=time*(swim?8:bike?14:16)+r.lane
-      const reaction=active?Math.exp(-(((distance-gate)/.031)**2)):0
-      const stumble=beat?.index===1&&r.affected?reaction:0
+      const hurdle=middle?hurdles[r.lane%15]:undefined
+      const delta=distance-(hurdle?.distance??gate)
+      const eventWidth=hurdle ? .018 : .031
+      const reaction=active?Math.exp(-((delta/eventWidth)**2)):0
+      const stumble=middle&&r.affected?reaction:0
+      if(hurdle&&r.affected&&delta>-.009&&delta<.027){
+        const spring=(delta+.009)/.036
+        hurdle.kick=Math.max(hurdle.kick,Math.sin(spring*Math.PI*2.2)*(1-spring)*.83)
+      }
       const row=Math.floor(r.lane/15)*1.65*Math.max(0,1-t*5)
-      const line=laneX(r)+.27*Math.sin(t*13+r.lane)+stumble*.55*Math.sin(r.lane)
+      const lane=laneX(r),side=lane===0?(r.lane%2?1:-1):Math.sign(lane)
+      const steering=early&&bike?reaction*(1-T.MathUtils.smoothstep(Math.abs(lane),2,5)):0
+      const dodge=ballLane===undefined?0:
+        Math.exp(-(((distance-runningBallDistance)/.027)**2))*(1-T.MathUtils.smoothstep(Math.abs(lane-ballLane),1.1,3.7))
+      const surge=late&&!swim&&r.affected?reaction:0
+      const line=lane+.27*Math.sin(t*13+r.lane)+stumble*(swim?.55:.31)*Math.sin(r.lane)
+        +side*(2.24+Math.sin(delta*134)*.32)*steering+side*dodge*1.45+side*surge*(bike?.84:.57)
       const point=coursePoint(sport,distance,line)
       const next=coursePoint(sport,distance+.003,line)
       const x=podium?podiumX[r.rank]:point.x
       const z=podium?-world+4:point.z+row
       const bounce=r.rank===0?.41*Math.abs(Math.sin(time*4.1))**1.4:.030*Math.sin(time*4+r.rank)
-      const yaw=podium?Math.PI:-Math.atan2(next.x-point.x,point.z-next.z)
+      const yaw=podium?Math.PI:-Math.atan2(next.x-point.x,point.z-next.z)+side*(steering*.21*Math.cos(delta*134)+dodge*.15)
       const along=bumpProfile?(x-bumpProfile.x)*bumpProfile.sin+(z-bumpProfile.z)*bumpProfile.cos:0
       const alongAxle=bumpProfile?Math.sin(yaw)*bumpProfile.sin+Math.cos(yaw)*bumpProfile.cos:0
       const frontLift=bumpProfile?speedBumpHeight(along-.46*alongAxle):0
@@ -407,7 +434,7 @@ export function createTrack(host:HTMLElement) {
       const bikePitch=bike?Math.atan2(frontY-rearY,.94):0
       const y=podium?.66+platform+podiumHeight[r.rank]+bounce:
         bike?(frontY+rearY)*.5+tireRadius+axleOffset*Math.cos(bikePitch):
-        point.y+(swim?.25:.85)+(t>0?.105*Math.abs(Math.sin(phase)):0)+reaction*(swim?.23:.75)*(stumble?.68:1)
+        point.y+(swim?.25:.85)+(t>0?.105*Math.abs(Math.sin(phase)):0)+(swim?.23:hurdle?.75:0)*reaction*(stumble?.68:1)
       const visible=!podium||r.rank>=3-revealed
       if(swimmerWakes){
         for(let band=0;band<2;band++){
@@ -448,7 +475,8 @@ export function createTrack(host:HTMLElement) {
         const localZ=dz+swing
         matrix.position.set(x+dx*Math.cos(yaw)+localZ*Math.sin(yaw),wheel?(dz<0?frontY:rearY)+tireRadius:y+dy,z+localZ*Math.cos(yaw)-dx*Math.sin(yaw))
         if(wheel)matrix.rotation.set(0,yaw+Math.PI/2,phase,'YXZ')
-        else matrix.rotation.set(j===0?(swim?-1.02:bike?-.38+bikePitch:0):angle+bikePitch,yaw,wobble,'YXZ')
+        else matrix.rotation.set(j===0?(swim?-1.02:bike?-.38+bikePitch-surge*.26:-surge*.15):angle+bikePitch,
+          yaw,wobble+(j===0?side*(steering*.24+dodge*.13):0),'YXZ')
         const squash=j===0&&t>0?.065*Math.sin(phase):0
         matrix.scale.set(visible?1-squash:0,visible?1+squash:0,visible?(j===0?.85:1):0)
         matrix.updateMatrix();part.setMatrixAt(i,matrix.matrix)
@@ -462,11 +490,11 @@ export function createTrack(host:HTMLElement) {
       poseArms(i,sport,x,y,z,yaw,phase,t>0,podium,starterPose,visible,time,r.rank,bikePitch)
       const face=faces[i]
       const gear=styles[i].gear
-      const tilt=podium?0:swim?-.25+stumble*.13:bike?-.08:0
+      const tilt=podium?0:swim?-.25+stumble*.13:bike?-.08-surge*.19:-surge*.10
       const turn=podium?yaw:yaw+Math.sin(phase*.65)*.07+stumble*Math.sin(phase)*.28
       const front=swim?.47:bike?.23:.08
       face.visible=visible
-      face.position.set(x-front*Math.sin(yaw),y+(swim?.49:.77),z-front*Math.cos(yaw))
+      face.position.set(x-front*Math.sin(yaw),y+(swim?.49:.77)-surge*(bike?.13:.041),z-front*Math.cos(yaw))
       face.rotation.set(tilt,turn,0,'YXZ')
       matrix.position.copy(face.position);matrix.rotation.copy(face.rotation)
       matrix.scale.setScalar(visible?1:0);matrix.updateMatrix();headShell.setMatrixAt(i,matrix.matrix)
@@ -554,9 +582,9 @@ export function createTrack(host:HTMLElement) {
         itemRipples.instanceMatrix.needsUpdate=true
       }
     })
-    hurdles.forEach(({base,pad},i)=>{
-      base.visible=!podium&&beat?.index===1
-      pad.rotation.z=base.visible?.075*Math.sin(time*7-i*.72):0
+    hurdles.forEach(({base,pad,kick})=>{
+      base.visible=middle
+      pad.rotation.x=-kick
     })
     const celebrate=podium&&revealed>0&&podiumAge>=0&&podiumAge<1.35
     rim.intensity=rimBase+(celebrate?.68*(1-podiumAge/1.35):0)
@@ -580,22 +608,23 @@ export function createTrack(host:HTMLElement) {
     const focus=leaders[0]
     const p=focus?position(focus,t):0
     const {x,y,z}=coursePoint(sport,p)
+    const chaseGap=T.MathUtils.clamp((p-(chasePosition??p))*world,0,9)
     if(podium){goal.set(0,3.25,-world+14.6);target.set(0,1.13,-world+4)}
-    else if(shot==='finish'){goal.set(11,5.8,-world-17);target.set(-1,1.25,-world+3)}
-    else if(shot==='event'){
-      const point=swim?coursePoint(sport,gate):{x,y,z}
-      goal.set(point.x+(swim?15:18),point.y+(swim?9:11),point.z-13)
-      target.set(point.x-1,point.y+.65,point.z+1)
+    else{
+      const opening=1-T.MathUtils.smoothstep(t,0,.14)
+      const event=beat?T.MathUtils.smoothstep(t,beat.at-.045,beat.at)
+        *(1-T.MathUtils.smoothstep(t,beat.at,raceBeats[sport][beat.index].end)):0
+      const sprint=T.MathUtils.smoothstep(t,finishShotAt,.91)
+      const approach=T.MathUtils.smoothstep(p,.86,.94)
+      const distance=15+opening*3+event*3-sprint*2
+      const ahead=coursePoint(sport,p+distance/world)
+      const side=5+event*(swim?3.2:4.5)-sprint
+      const height=T.MathUtils.lerp(5.5+opening*1.8+event*2.1+chaseGap*.13,4.8,approach)
+      goal.set(ahead.x+side,ahead.y+height,ahead.z)
+      target.set(x+2,y+.75,z+2.1+chaseGap*.46)
     }
-    else if(shot==='leader'){
-      const orbit=T.MathUtils.smoothstep(t,.15,.235)
-      const angle=T.MathUtils.lerp(.42,2.92,orbit)
-      goal.set(x+(swim?15:19)*Math.sin(angle),y+T.MathUtils.lerp(18,7,orbit),z+18*Math.cos(angle))
-      target.set(x-2*orbit,y+.8,z+T.MathUtils.lerp(-3,2,orbit))
-    }
-    else if(t>0){goal.set(x+8,y+18,z+18);target.set(x,y+.5,z-3)}
-    else {goal.set(x+16,y+14,z-16);target.set(x,y+.8,z+2)}
-    const ease=1-Math.exp(-dt*4.8)
+    const ease=cameraReady?1-Math.exp(-dt*4.2):1
+    cameraReady=true
     look.lerp(target,ease);camera.position.lerp(goal,ease);camera.lookAt(look)
     renderer.render(scene,camera)
   }

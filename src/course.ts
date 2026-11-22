@@ -25,6 +25,7 @@ export function coursePoint(sport:Sport,distance:number,lane=0) {
 
 export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirection:T.Vector3,art?:HTMLImageElement){
   const palette=courseColors[podium?'podium':sport]
+  let regularBoard:T.Mesh|undefined,sprintBoard:T.Mesh|undefined
   const boxes:number[][]=[]
   const balls:number[][]=[]
   const shadows:number[][]=[]
@@ -648,6 +649,18 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
           panelLettering(ctx,'TRACK & FIELD','#f9d88f',64,height*.65)
         })
         board.position.set(p.x+.22,4.35,p.z);board.rotation.y=Math.PI/2;group.add(board)
+        if(u===.73){
+          regularBoard=board
+          sprintBoard=paintedPanel(8.99,2.62,ctx=>{
+            const {width,height}=ctx.canvas
+            ctx.fillStyle='#51245c';ctx.fillRect(0,0,width,height)
+            ctx.fillStyle='#ffc472';ctx.fillRect(0,0,width,24)
+            panelLettering(ctx,'마지막 스퍼트','#fff1b5',104,height*.39)
+            panelLettering(ctx,'FINAL SPRINT','#fbc085',52,height*.71)
+          })
+          sprintBoard.position.copy(board.position);sprintBoard.rotation.copy(board.rotation)
+          sprintBoard.visible=false;group.add(sprintBoard)
+        }
       }
     }
     for(const u of [0,1]){
@@ -772,5 +785,11 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
         `)
     }
   }
-  return (time:number)=>{waterTime.value=time}
+  return (time:number,sprinting=false)=>{
+    waterTime.value=time
+    if(regularBoard&&sprintBoard){
+      regularBoard.visible=!sprinting
+      sprintBoard.visible=sprinting
+    }
+  }
 }
