@@ -2,29 +2,32 @@ import {api, ApiError, assetUrl, esc, loginPanel, operatorChannel, personPhoto, 
 import {audioSlots, currentRace, podiumIntervalMs, podiumRevealed, stage, type Person, type Race} from './model.ts'
 import {cuePoints, finishShotAt, position, raceBeats, trackOrder, type Beat, type Runner} from './playback.ts'
 import {assignAvatarStyles, starterStyle, type AvatarStyle} from './avatar-style.ts'
+import countdownCard from './assets/countdown-mascot.webp'
 
 type Slot=typeof audioSlots[number]
 const notes:Record<Slot,number[]>={opening:[196,247,294,392],countdown:[440],start:[523,784],bgm:[130,196,155,196,117,175,147,175],
   item:[392,523,659],obstacle:[120,85],pass:[340,480],finish:[392,494,587],podium:[392,494,587,784]}
+const countdownHz=[1047,880,660]
 function sound(){
   let context:AudioContext|undefined
   let files:Partial<Record<Slot,HTMLAudioElement>>={}
   let mix={bgm:.35,sfx:.7,muted:false}
   let loop:number|undefined
   let notesIndex=0
-  function play(type:Slot,sport?:Race['sport']) {
+  function play(type:Slot,sport?:Race['sport'],countdownStep?:number) {
     const level=mix.muted?0:type==='bgm'?mix.bgm:mix.sfx
     if(!context || !level)return
     const audio=files[type]
     if(audio){
       audio.volume=level
       if(type!=='bgm')audio.currentTime=0
-      void audio.play().catch(()=>tone(type,level,sport))
-    }else tone(type,level,sport)
+      void audio.play().catch(()=>tone(type,level,sport,countdownStep))
+    }else tone(type,level,sport,countdownStep)
   }
-  function tone(type:Slot,level:number,sport?:Race['sport']) {
+  function tone(type:Slot,level:number,sport?:Race['sport'],countdownStep?:number) {
     const ctx=context!
-    const sequence=type==='bgm'?[notes.bgm[notesIndex++%notes.bgm.length]]:notes[type]
+    const sequence=type==='bgm'?[notes.bgm[notesIndex++%notes.bgm.length]]:
+      countdownStep?[countdownHz[countdownStep-1]]:notes[type]
     sequence.forEach((hz,i)=>{
       const start=ctx.currentTime+i*.12
       const wave=ctx.createOscillator(), gain=ctx.createGain()
@@ -127,7 +130,7 @@ export function display(app:HTMLElement) {
     const appearance=(person:Person)=>avatarStyles.get(person.id)??starterStyle
     const loaded=new Map<string,HTMLImageElement>()
     const preload=(s:ViewState)=>{
-      const urls=[...s.people.filter(p=>p.active).map(p=>personPhoto(s,p)),assetUrl(s,s.config.logo),assetUrl(s,s.config.starter),
+      const urls=[countdownCard,...s.people.filter(p=>p.active).map(p=>personPhoto(s,p)),assetUrl(s,s.config.logo),assetUrl(s,s.config.starter),
         assetUrl(s,s.config.podiumBackdrop??''),assetUrl(s,s.config.stadiumAd??'')]
       for(const url of urls)if(url&&!loaded.has(url)){const img=new Image();img.src=url;loaded.set(url,img)}
     }
@@ -197,8 +200,14 @@ export function display(app:HTMLElement) {
       overlay.dataset.runners=String(p==='racing'&&tv.graphics==='3d'?runners.length:0)
       if(p==='countdown'){
         const count=Math.ceil(((race?.startsAt??now)-now)/1000)
-        if(count<=3&&count!==marker){marker=count;audio.play('countdown')}
-        setMarkup('<div class="center"><div class="eyebrow">'+esc(s.config.names[sport])+' · 출발 카운트다운</div><div class="count">'+(count>3?'READY':count)+'</div></div>')
+        if(count>=1&&count<=3){
+          setMarkup('<div class="countdown-card"><img src="'+esc(countdownCard)+'" alt=""><div class="count" aria-live="polite"></div></div>')
+          if(count!==marker){
+            marker=count
+            overlay.querySelector('.count')!.textContent=String(count)
+            audio.play('countdown',undefined,count)
+          }
+        }else setMarkup('')
       }else if(p==='racing'||p==='finish'){
         if(p==='finish'||!ranking.length||time-lastRanking>=600){ranking=ranked.slice(0,10).map(({r})=>r);lastRanking=time}
         const savedCaption=s.config.captions[sport]

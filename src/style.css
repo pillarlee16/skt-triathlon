@@ -475,10 +475,25 @@ th {
   font-size: clamp(1rem,2vw,2rem);
 }
 
-.count {
-  font-size: clamp(4rem,14vw,15rem);
-  font-weight: 950;
-  line-height: 1.03;
+.countdown-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(59vw,108vh);
+  transform: translate(-50%,-50%);
+  container-type: inline-size;
+}
+
+.countdown-card img { display: block; width: 100%; aspect-ratio: 1671 / 941; }
+
+.countdown-card .count {
+  position: absolute;
+  left: 72%;
+  top: 41%;
+  transform: translate(-50%,-50%);
+  color: #102654;
+  font: 950 30cqw/1 system-ui,sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 .leaderboard {
@@ -676,7 +691,6 @@ input:not([type=checkbox]),select { background: #fffdfa; }
 .broadcast-tools button { color: var(--ink); background: #fffaf0ee; }
 .center { border-top: .65rem solid var(--track-accent); }
 .center p { color: var(--dim); }
-.count { color: #654481; text-shadow: .04em .05em 0 var(--track-accent); }
 .leaderboard { border-left: .45rem solid var(--track-accent); }
 .runner-avatar { background-color: #ee719c; }
 .ticker { bottom: 12vh; max-width: 60vw; border-radius: .7em; background: #fff0ad; color: #3e2c4c; box-shadow: 0 .25em 0 #704d7d60; font-size: clamp(1rem,2.15vw,2.5rem); }

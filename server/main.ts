@@ -25,7 +25,7 @@ if(!existsSync(index))throw new Error('Run npm run build before starting the ser
 const api=createEventApi({database:join(dataDir,'triathlon.sqlite'),mode:'live',password,secret,secure:origin.startsWith('https://')})
 const pages=new Set(['/','/admin','/display','/start'])
 const mime=new Map([['.html','text/html; charset=utf-8'],['.js','text/javascript; charset=utf-8'],
-  ['.css','text/css; charset=utf-8'],['.svg','image/svg+xml'],['.png','image/png'],['.ico','image/x-icon']])
+  ['.css','text/css; charset=utf-8'],['.svg','image/svg+xml'],['.png','image/png'],['.webp','image/webp'],['.ico','image/x-icon']])
 
 const server=createServer(async(req,res)=>{
   try{
