@@ -5,7 +5,7 @@ const path=location.pathname.replace(/\/$/,'')
 if(path==='/admin')void import('./admin.ts').then(({admin})=>admin(app))
 else if(path==='/display')void import('./display.ts').then(({display})=>display(app))
 else if(path==='/start'){
-  app.innerHTML='<section class="tablet"><header><h1>SKT 철인3종<br>럭키드로우</h1></header><button>START</button><p role="status"></p></section>'
+  app.innerHTML='<section class="tablet"><button>START</button><span role="status"></span></section>'
   const button=app.querySelector('button')!,status=app.querySelector('[role="status"]')!
   button.onclick=async()=>{
     button.disabled=true

@@ -242,7 +242,10 @@
 ## 출발 깃발 마스코트 적용
 
 - 선택한 출발 깃발형 시안에서 배경과 문구를 제거한 투명 팝업을 만들었습니다. 세 종목의 송출 카운트다운에 적용했고, 마스코트와 타이머를 유지한 채 숫자만 3·2·1로 바뀝니다. 숫자별 기본 효과음을 추가하고 관리자 설정의 카운트다운 음원과 음향 조절을 연결했습니다.
-- `node .local/race-countdown-qa.mjs`로 숫자 3장, 각 숫자에 한 번씩 나는 효과음, 출발 시 팝업이 사라지는 동작을 확인했습니다. 타입 검사, 빌드, `git diff --check`가 통과했습니다. 촬영본은 `output/playwright/countdown-mascot`에 있습니다. Railway 배포는 별도입니다.
+- `node .local/race-countdown-qa.mjs`로 숫자 3장, 각 숫자에 한 번씩 나는 효과음, 출발 시 팝업이 사라지는 동작을 확인했습니다. 타입 검사, 빌드, `git diff --check`가 통과했습니다. 촬영본은 `output/playwright/countdown-mascot`에 있습니다.
+- GitHub `main`의 `6256ffb`를 기존 Railway 운영 서비스에 배포했습니다. 배포 `216f87cb-4b7e-4ae7-a10d-17368b89daaa`가 성공했습니다. 운영 헬스체크와 배포된 송출 화면에서 가상 경기로 팝업, 효과음, 출발 전환을 확인했습니다. 검증 화면은 `output/playwright/railway-countdown-mascot`에 있습니다.
+
+- 태블릿 리모컨은 화면 가운데 START 버튼만 표시하도록 수정했습니다. 요청 결과는 스크린리더로 안내합니다. 타입 검사와 빌드가 통과했습니다. Railway 반영은 남아 있습니다.
 
 ## 다음 작업
 

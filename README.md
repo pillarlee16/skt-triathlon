@@ -21,7 +21,7 @@ npm run dev
 1. GitHub 저장소의 `main` 브랜치를 기존 Railway 서비스에 연결합니다. Railpack의 빌드 명령은 `npm run build`, 시작 명령은 `npm start`, 헬스체크는 `/health`로 설정합니다. 서비스는 Node.js 24와 Railway가 주는 `PORT`를 사용합니다.
 2. 서비스에 영구 볼륨 하나를 `/data`에 연결합니다. 서버는 볼륨이 없으면 시작하지 않습니다. SQLite는 `/data/triathlon.sqlite`에 상태와 파일을 함께 저장합니다.
 3. Railway 서비스 변수에 `ADMIN_PASSWORD`와 32자 이상 무작위 `SESSION_SECRET`을 저장합니다. 공개 주소는 Railway가 제공하는 도메인을 사용하며, 다른 도메인으로 POST를 받을 경우 `PUBLIC_ORIGIN`을 그 HTTPS 주소로 지정합니다.
-4. [운영 사이트](https://skt-triathlon.up.railway.app/admin)에서 로그인하고 명단을 준비합니다. 실제 행사 전 Hobby로 올리고 가상 데이터와 현장 기기로 START·시상·CSV를 확인합니다. 볼륨이 붙은 서비스는 재배포 시 잠깐 중단될 수 있으므로 행사 중 배포를 피합니다.
+4. [운영 사이트](https://skt-luckydraw.up.railway.app/admin)에서 로그인하고 명단을 준비합니다. 실제 행사 전 Hobby로 올리고 가상 데이터와 현장 기기로 START·시상·CSV를 확인합니다. 볼륨이 붙은 서비스는 재배포 시 잠깐 중단될 수 있으므로 행사 중 배포를 피합니다.
 
 ## 행사 운영과 복구
 
