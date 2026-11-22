@@ -8,11 +8,11 @@
   "scripts": {
     "dev": "vite --configLoader native",
     "build": "vite build --configLoader native",
+    "start": "node server/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit false --outDir .local/test-build && node --test .local/test-build/tests/*.test.js"
   },
   "dependencies": {
-    "@vercel/blob": "^2.6.1",
     "three": "^0.183.0"
   },
   "devDependencies": {

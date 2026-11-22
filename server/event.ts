@@ -1,61 +1,20 @@
 import {createHash, createHmac, randomBytes, randomUUID, timingSafeEqual} from 'node:crypto'
-import {apply, RuleError} from '../src/engine.js'
-import {csv, currentRace, initial, stage, sports, type Sport, type Action, type Asset, type Mode, type State} from '../src/model.js'
+import {apply, RuleError} from '../src/engine.ts'
+import {csv, currentRace, sports, type Sport, type Action, type Asset, type Mode, type State} from '../src/model.ts'
+import {openStore,type StoredFile} from './store.ts'
 
-const local = !process.env.VERCEL && !process.env.BLOB_READ_WRITE_TOKEN
-const memory = new Map<Mode,State>()
-const maxFile=4_000_000
+export const maxFile=4_000_000
 const sha=(value:string)=>createHash('sha256').update(value).digest()
 const safeEqual=(a:string,b:string)=>timingSafeEqual(sha(a),sha(b))
-const password=()=>process.env.ADMIN_PASSWORD ?? (local?'rehearsal':'')
-const secret=()=>process.env.SESSION_SECRET ?? (local?'local-rehearsal-only':'')
-const sign=(value:string)=>createHmac('sha256',secret()).update(value).digest('base64url')
-const root=(mode:Mode)=>'triathlon-v1/'+(process.env.VERCEL_ENV==='preview'?'preview':mode)+'/'
 const headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}
 const json=(body:unknown,status=200,extra:HeadersInit={})=>Response.json(body,{status,headers:{...headers,...extra}})
-const fileMemory=new Map<string,{bytes:ArrayBuffer; mime:string}>()
 class Conflict extends Error {}
 class Unauthorized extends Error {}
 
-async function read(mode:Mode):Promise<State> {
-  if (local) return memory.get(mode)??initial(mode)
-  const {get}=await import('@vercel/blob')
-  const blob=await get(root(mode)+'state.json',{access:'private',useCache:false})
-  return blob?.statusCode===200 ? await new Response(blob.stream).json() as State : initial(mode)
-}
-async function stateWriteTag(mode:Mode) {
-  const {head,BlobNotFoundError}=await import('@vercel/blob')
-  try {
-    const {etag}=await head(root(mode)+'state.json')
-    if(!etag) throw new Error('Blob state metadata is missing an ETag')
-    return etag
-  } catch(error) {
-    if(error instanceof BlobNotFoundError) return undefined
-    throw error
-  }
-}
-async function write(state:State,etag?:string) {
-  if (local) {
-    if ((memory.get(state.mode)?.revision??0)!==state.revision-1) throw new Conflict()
-    memory.set(state.mode,state)
-    return
-  }
-  const {put,BlobPreconditionFailedError}=await import('@vercel/blob')
-  try {
-    await put(root(state.mode)+'state.json',JSON.stringify(state),{
-      access:'private',contentType:'application/json',allowOverwrite:!!etag,...(etag?{ifMatch:etag}:{})
-    })
-  } catch(error) {
-    if (error instanceof BlobPreconditionFailedError || (!etag && (await read(state.mode)).revision>0)) {
-      throw new Conflict('blob-write')
-    }
-    throw error
-  }
-}
-function isAdmin(request:Request) {
+function isAdmin(request:Request,sign:(value:string)=>string) {
   const cookie=request.headers.get('cookie')?.split(';').map(v=>v.trim()).find(v=>v.startsWith('tri_admin='))?.slice(10)
   const [expires,signature]=cookie?.split('.')??[]
-  return !!secret() && Number(expires)>Date.now() && !!signature && safeEqual(signature,sign(expires))
+  return Number(expires)>Date.now() && !!signature && safeEqual(signature,sign(expires))
 }
 function tabletAllowed(s:State, request:Request, now:number) {
   const token=request.headers.get('authorization')?.replace(/^Bearer /,'')??''
@@ -77,31 +36,29 @@ function imageType(bytes:Uint8Array) {
   if (text(0,4)==='RIFF' && text(8,12)==='WAVE') return 'audio/wav'
   if (text(0,4)==='OggS') return 'audio/ogg'
 }
-export default {async fetch(request:Request):Promise<Response> {
+type EventOptions={database:string;mode:Mode;password:string;secret:string;secure:boolean}
+
+export function createEventApi({database,mode,password,secret,secure}:EventOptions){
+ const store=openStore(database,mode)
+ const sign=(value:string)=>createHmac('sha256',secret).update(value).digest('base64url')
+ async function fetch(request:Request):Promise<Response> {
   const url=new URL(request.url)
   const op=url.searchParams.get('op')??'state'
-  const liveEnabled=!!process.env.VERCEL&&process.env.VERCEL_ENV==='production'&&process.env.APP_LIVE_ENABLED==='true'
-  const mode:Mode=liveEnabled?'live':'rehearsal'
   const legacyMode=url.searchParams.get('mode')
   if (legacyMode!==null&&legacyMode!==mode) return json({error:'이 링크는 현재 배포 환경에서 사용할 수 없습니다.'},403)
   const now=Date.now()
-  if (!password() || (!local && secret().length<32)) return json({error:'운영 환경의 인증 설정을 확인하세요.'},503)
-  const admin=isAdmin(request)
+  const admin=isAdmin(request,sign)
   try {
     if (request.method==='POST' && request.headers.get('origin')!==url.origin) throw new Unauthorized()
     if(op==='login' && request.method==='POST') {
       const body=await request.json()
-      if(typeof body.password!=='string' || !safeEqual(body.password,password())) throw new Unauthorized()
+      if(typeof body.password!=='string' || !safeEqual(body.password,password)) throw new Unauthorized()
       const expires=String(now+12*60*60*1000)
-      return json({ok:true},200,{'Set-Cookie':'tri_admin='+expires+'.'+sign(expires)+'; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200'+(local?'':'; Secure')})
+      return json({ok:true},200,{'Set-Cookie':'tri_admin='+expires+'.'+sign(expires)+'; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200'+(secure?'; Secure':'')})
     }
     if (!admin && op!=='tablet' && op!=='tabletStart') throw new Unauthorized()
     if (op==='tabletStart' && request.method!=='POST') return json({error:'지원하지 않는 요청입니다.'},405)
-    const willWrite=request.method==='POST' && ['upload','action','tabletStart'].includes(op)
-    // Take the storage metadata version before reading the latest body.
-    // A concurrent overwrite makes this version fail the conditional write.
-    const etag=willWrite && !local ? await stateWriteTag(mode) : undefined
-    const state=await read(mode)
+    const state=store.read()
     if(op==='tablet' && request.method==='GET') return json({enabled:tabletAllowed(state,request,now)})
     if(op==='state' && request.method==='GET') return json(projection(state,Date.now(),url.searchParams.get('view')==='display'))
     if(op==='csv' && request.method==='GET') return new Response(csv(state,now),{headers:{
@@ -110,12 +67,8 @@ export default {async fetch(request:Request):Promise<Response> {
     if(op==='file' && request.method==='GET') {
       const asset=state.assets.find(a=>a.id===url.searchParams.get('id'))
       if(!asset) return json({error:'파일이 없습니다.'},404)
-      const path=root(mode)+'asset/'+asset.id
-      const saved=fileMemory.get(path)
-      if(local) return saved ? new Response(saved.bytes,{headers:{...headers,'Content-Type':saved.mime}}) : json({error:'파일이 없습니다.'},404)
-      const {get}=await import('@vercel/blob')
-      const blob=await get(path,{access:'private'})
-      return blob?.statusCode===200 ? new Response(blob.stream,{headers:{...headers,'Content-Type':blob.blob.contentType}}) : json({error:'파일이 없습니다.'},404)
+      const saved=store.file(asset.id)
+      return saved ? new Response(Buffer.from(saved.data),{headers:{...headers,'Content-Type':saved.mime}}) : json({error:'파일이 없습니다.'},404)
     }
     if(request.method!=='POST' || !['upload','action','tabletStart'].includes(op)) return json({error:'지원하지 않는 요청입니다.'},405)
     const id=request.headers.get('x-request-id')??''
@@ -127,10 +80,9 @@ export default {async fetch(request:Request):Promise<Response> {
     const key=op==='tabletStart'?sha((request.headers.get('authorization')??'')+id).toString('hex'):id
     if(Object.hasOwn(state.requests,key)) return json({ok:true,...(admin?{state:projection(state,Date.now(),false)}:{})})
     if(op!=='tabletStart' && request.headers.get('x-revision')!==String(state.revision)) throw new Conflict('client-revision')
-    if(!local && !etag && state.revision>0) throw new Conflict('blob-created-during-read')
     let action:Action
     let token:string|undefined
-    let upload:{asset:Asset;bytes:ArrayBuffer;mime:string}|undefined
+    let upload:StoredFile|undefined
     if(op==='upload') {
       const name=url.searchParams.get('name')?.trim()??''
       if(!name || name.length>200 || /[\\/]/.test(name)) throw new RuleError('파일명을 확인하세요.')
@@ -139,7 +91,7 @@ export default {async fetch(request:Request):Promise<Response> {
       const mime=imageType(new Uint8Array(bytes,0,Math.min(12,bytes.byteLength)))
       if(!mime) return json({error:'JPG, PNG, WebP, MP3, WAV, OGG를 지원합니다.'},415)
       const asset:Asset={id:randomUUID(),name,kind:mime.startsWith('image/')?'image':'audio'}
-      upload={asset,bytes,mime}
+      upload={id:asset.id,bytes,mime}
       const person=url.searchParams.get('person')
       const prize=url.searchParams.get('prize') as Sport|null
       if((person!==null&&(!person||prize!==null))||(prize!==null&&!sports.includes(prize)))throw new RuleError('파일을 연결할 항목을 확인하세요.')
@@ -156,15 +108,7 @@ export default {async fetch(request:Request):Promise<Response> {
     const next=apply(state,action,Date.now())
     next.revision++
     next.requests[key]=next.revision
-    if(upload) {
-      const path=root(mode)+'asset/'+upload.asset.id
-      if(local) fileMemory.set(path,{bytes:upload.bytes,mime:upload.mime})
-      else {
-        const {put}=await import('@vercel/blob')
-        await put(path,Buffer.from(upload.bytes),{access:'private',contentType:upload.mime})
-      }
-    }
-    await write(next,etag)
+    if(!store.write(next,upload)) throw new Conflict('revision')
     return json({ok:true,token,...(admin?{state:projection(next,Date.now(),false)}:{})})
   } catch(error) {
     if(error instanceof Unauthorized) return json({error:'로그인 또는 유효한 시작 링크가 필요합니다.'},401)
@@ -176,4 +120,6 @@ export default {async fetch(request:Request):Promise<Response> {
     console.error('event request failed',error instanceof Error?error.name:'UnknownError')
     return json({error:'저장소 연결을 확인하고 다시 시도하세요.'},503)
   }
-}}
+ }
+ return {fetch,close:store.close}
+}

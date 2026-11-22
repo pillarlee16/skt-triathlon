@@ -1,38 +1,41 @@
 import {randomUUID} from 'node:crypto'
+import {mkdtempSync,rmdirSync,unlinkSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import eventApi from '../api/event.ts'
+import {createEventApi} from '../server/event.ts'
 const origin='http://localhost:5173'
 const url=(op:string,mode?:string)=>origin+'/api/event?op='+op+(mode?'&mode='+mode:'')
-const post=(op:string,body:unknown,headers:Record<string,string>={})=>eventApi.fetch(new Request(url(op),{
-  method:'POST',headers:{origin,'content-type':'application/json',...headers},body:JSON.stringify(body)
-}))
-const state=(cookie:string,op='state')=>eventApi.fetch(new Request(url(op),{headers:{cookie}}))
 
-test('the deployment selects live state only when production explicitly enables it',async t=>{
-  const keys=['VERCEL','VERCEL_ENV','APP_LIVE_ENABLED'] as const
-  const saved=keys.map(key=>process.env[key])
-  t.after(()=>keys.forEach((key,i)=>{
-    const value=saved[i]
-    if(value===undefined)delete process.env[key]
-    else process.env[key]=value
-  }))
+test('live and local links stay scoped and hosted sessions use HTTPS cookies',async t=>{
+  const eventApi=createEventApi({database:':memory:',mode:'live',password:'test-admin',secret:'test-secret',secure:true})
+  t.after(()=>eventApi.close())
   const get=(mode?:string)=>eventApi.fetch(new Request(url('state',mode)))
-  process.env.VERCEL='1'
-  process.env.VERCEL_ENV='production'
-  delete process.env.APP_LIVE_ENABLED
   assert.equal((await get()).status,401)
-  assert.equal((await get('rehearsal')).status,401)
-  assert.equal((await get('live')).status,403)
-  process.env.APP_LIVE_ENABLED='true'
   assert.equal((await get('live')).status,401)
   assert.equal((await get('rehearsal')).status,403)
-  process.env.VERCEL_ENV='preview'
-  assert.equal((await get('live')).status,403)
-  assert.equal((await get('rehearsal')).status,401)
+  const login=await eventApi.fetch(new Request(url('login'),{
+    method:'POST',headers:{origin},body:JSON.stringify({password:'test-admin'})
+  }))
+  assert.equal(login.status,200)
+  assert.match(login.headers.get('set-cookie')??'',/; Secure$/)
 })
 
-test('authenticated operation commits START and NEXT once, including delayed retries',async t=>{
+test('SQLite keeps files and results after reopening and commits START and NEXT only once',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'triathlon-test-'))
+  const database=join(dir,'event.sqlite')
+  const open=()=>createEventApi({database,mode:'rehearsal',password:'rehearsal',secret:'test-secret',secure:false})
+  let eventApi=open()
+  t.after(()=>{
+    eventApi.close()
+    unlinkSync(database)
+    rmdirSync(dir)
+  })
+  const post=(op:string,body:unknown,headers:Record<string,string>={})=>eventApi.fetch(new Request(url(op),{
+    method:'POST',headers:{origin,'content-type':'application/json',...headers},body:JSON.stringify(body)
+  }))
+  const state=(cookie:string,op='state')=>eventApi.fetch(new Request(url(op),{headers:{cookie}}))
   let now=Date.now()
   t.mock.method(Date,'now',()=>now)
   assert.equal((await state('')).status,401)
@@ -87,8 +90,12 @@ test('authenticated operation commits START and NEXT once, including delayed ret
   assert.equal((await (await next()).json()).state.revision,16)
   assert.equal((await command('next',16)).status,200)
   assert.equal((await (await next()).json()).state.ready.sport,'cycling')
+  eventApi.close()
+  eventApi=open()
   const after=await (await state(cookie)).json()
   assert.equal(after.races.length,1)
   assert.equal(after.races[0].winners.length,3)
   assert.equal((await (await state(cookie,'csv')).text()).split('\r\n').length,4)
+  const photo=await eventApi.fetch(new Request(url('file')+'&id='+withPhotos[0].photo,{headers:{cookie}}))
+  assert.deepEqual([...new Uint8Array(await photo.arrayBuffer())],[137,80,78,71])
 })
