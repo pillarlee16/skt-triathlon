@@ -82,7 +82,7 @@ test('SQLite keeps files and results after reopening and commits START and NEXT 
   assert.equal((await next()).status,400)
   const podium=await (await state(cookie)).json()
   assert.deepEqual(podium.races[0].winners,display.races[0].winners)
-  now+=10000
+  now+=12000
   assert.equal((await (await next()).json()).state.revision,15)
   assert.equal((await (await next()).json()).state.ready.sport,'cycling')
   eventApi.close()
@@ -103,7 +103,7 @@ test('SQLite keeps files and results after reopening and commits START and NEXT 
     assert.equal((await tabletStart()).status,400)
     now=race.endsAt
     assert.equal((await command('next',current.revision)).status,400)
-    now+=10000
+    now+=12000
     assert.equal((await command('next',current.revision)).status,200)
   }
   assert.equal((await tabletStart()).status,400)

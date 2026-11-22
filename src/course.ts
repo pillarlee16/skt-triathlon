@@ -96,7 +96,7 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
     const points:number[]=[], triangles:number[]=[]
     const slices=sport==='swimming'?218:120
     for(let i=0;i<=slices;i++){
-      const u=-.07+i*(sport==='cycling'&&!podium?1.32:1.14)/slices
+      const u=-.07+i*(podium?1.14:1.37)/slices
       const a=at(u,left), b=at(u,right)
       points.push(a.x,a.y+height,a.z,b.x,b.y+height,b.z)
       if(i){const n=i*2;triangles.push(n-2,n-1,n,n-1,n+1,n)}

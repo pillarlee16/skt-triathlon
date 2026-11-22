@@ -1,5 +1,5 @@
 import {randomInt, randomUUID} from 'node:crypto'
-import {currentRace, findAsset, preparationLocked, sports, stage, audioSlots, countdownMs, startLeadMs, podiumLeadMs, podiumReadyAt, type Action, type State, type Race, type Sport} from './model.ts'
+import {currentRace, findAsset, preparationLocked, sports, stage, audioSlots, countdownMs, startLeadMs, podiumLeadMs, podiumTransitionMs, podiumReadyAt, type Action, type State, type Race, type Sport} from './model.ts'
 
 export class RuleError extends Error {}
 const requireRule: (ok:unknown, message:string)=>asserts ok = (ok,message)=>{
@@ -28,7 +28,7 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
     case 'start':
     case 'emergency': {
       if (race && action.type==='emergency') {
-        requireRule(stage(s,now)!=='podium','이미 발표 중입니다.')
+        requireRule(race.podiumAt===undefined&&now<race.endsAt,'이미 발표 중입니다.')
         race.endsAt=Math.min(now,race.endsAt)
         race.podiumAt=now+podiumLeadMs
         break
@@ -49,7 +49,7 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       const attempt:Race={id:randomUUID(),sport,seed:pick(2**31),startsAt,createdAt:now,redrawId:s.ready.redrawId,eligibleCount,
         endsAt:emergency ? now : startsAt+s.config.duration[sport]*1000,winners}
       if (emergency) attempt.podiumAt=now+podiumLeadMs
-      else attempt.finishers=Math.min(10,s.people.filter(p=>p.active).length)
+      else attempt.transitionMs=podiumTransitionMs
       s.races.push(attempt)
       s.current=attempt.id
       s.locked=true

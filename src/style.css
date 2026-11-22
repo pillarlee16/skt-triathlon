@@ -491,6 +491,50 @@ th {
   font-variant-numeric: tabular-nums;
 }
 
+.podium-intro {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #1713264a;
+  animation: podium-intro-in .45s ease-out both;
+}
+
+.podium-intro-card {
+  position: relative;
+  width: min(57vw,104vh);
+  aspect-ratio: 1019 / 538;
+  overflow: hidden;
+  border-radius: 6.5% / 12%;
+  box-shadow: 0 .8rem 2.5rem #18122655;
+}
+
+.podium-intro-card img {
+  position: absolute;
+  width: 164.08%;
+  left: -31.99%;
+  top: -38.1%;
+}
+
+.broadcast::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: #272035;
+  opacity: var(--podium-veil,0);
+}
+
+@keyframes podium-intro-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .podium-intro { animation: none; }
+}
+
 .leaderboard {
   position: absolute;
   left: 3vw;

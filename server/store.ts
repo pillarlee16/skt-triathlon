@@ -22,9 +22,12 @@ export function openStore(database:string,mode:Mode){
   return {
     read(){
       const saved=JSON.parse(state.get()!.data as string) as State
-      if(saved.raceTimingVersion===undefined){
-        for(const sport of sports)if(saved.config.duration[sport]===40)saved.config.duration[sport]=20
-        saved.raceTimingVersion=1
+      if(saved.raceTimingVersion!==2){
+        for(const sport of sports){
+          const duration=saved.config.duration[sport]
+          if(duration===20 || duration===40&&saved.raceTimingVersion===undefined)saved.config.duration[sport]=30
+        }
+        saved.raceTimingVersion=2
       }
       return saved
     },

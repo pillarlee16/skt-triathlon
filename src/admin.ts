@@ -1,7 +1,7 @@
 import {api, ApiError, assetUrl, endpoint, esc, loginPanel, mutate, mutation, operatorChannel, personPhoto, poll, type TvStatus, type ViewState} from './client.ts'
 import {audioSlots, canPrepare, preparationLocked, currentRace, labels, podiumReadyAt, sports, stage, type Action, type Config, type Sport} from './model.ts'
 
-const phase={setup:'준비 중',ready:'출발 대기',countdown:'출발 카운트다운',racing:'경주 중',podium:'시상',complete:'행사 완료'}
+const phase={setup:'준비 중',ready:'출발 대기',countdown:'출발 카운트다운',racing:'경주 중',transition:'시상식 전환',podium:'시상',complete:'행사 완료'}
 const audioNames=['오프닝','카운트다운','출발','경주 BGM','부스터','충돌','추월','결승','시상 효과음','시상식 BGM','1위 환호성']
 const prepStatus=(s:ViewState,unsaved:boolean)=>{
   if(unsaved)return '변경한 이름과 상품명을 먼저 저장하세요.'
@@ -116,7 +116,7 @@ export function admin(app:HTMLElement) {
     }).join('')+'</ol>'
     const cue=p==='ready'?'TV 화면과 음향을 확인한 뒤 START를 누르세요. 누르면 당첨 결과가 저장되고 카운트다운이 시작됩니다.':
       p==='countdown'?'TV 화면에서 출발 카운트다운을 확인하세요.':
-      p==='racing'?'상위 10명이 결승선을 통과하면 시상식으로 자동 전환됩니다.':
+      p==='racing'||p==='transition'?'결승 연출이 끝나면 시상식이 자동으로 시작됩니다.':
       p==='podium'?(announced?'호명과 촬영이 끝나면 다음 단계로 진행하세요.':'수상자 공개가 끝나면 다음 단계로 이동할 수 있습니다.'):''
     const control=(p!=='complete'?'<section class="panel operation-main">'+sportProgress+'<h2>'+esc(sport?s.config.names[sport]+' · '+phase[p]:phase[p])+'</h2>'+
       (cue?'<p class="operation-cue">'+cue+'</p>':'')+

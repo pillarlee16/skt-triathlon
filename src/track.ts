@@ -661,7 +661,7 @@ export function createTrack(host:HTMLElement) {
     }
     effects.instanceMatrix.needsUpdate=true
     const focus=leaders[0]
-    const p=focus?position(focus,t):0
+    const p=focus?Math.min(.99,position(focus,t)):0
     const {x,y,z}=coursePoint(sport,p)
     const chaseGap=T.MathUtils.clamp((p-(chasePosition??p))*world,0,9)
     if(podium){goal.set(0,3.25,-world+14.6);target.set(0,1.13,-world+4)}

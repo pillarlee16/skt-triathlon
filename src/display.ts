@@ -3,6 +3,7 @@ import {audioSlots, currentRace, podiumIntervalMs, podiumRevealed, podiumStartAt
 import {cuePoints, finishShotAt, position, raceBeats, trackOrder, type Beat, type Runner} from './playback.ts'
 import {assignAvatarStyles, starterStyle, type AvatarStyle} from './avatar-style.ts'
 import countdownCard from './assets/countdown-mascot.webp'
+import podiumIntroCard from './assets/podium-intro.webp'
 import winnerCheer from './assets/winner-cheer.mp3'
 import podiumFanfare from './assets/podium-fanfare.mp3'
 
@@ -156,7 +157,7 @@ export function display(app:HTMLElement) {
     const appearance=(person:Person)=>avatarStyles.get(person.id)??starterStyle
     const loaded=new Map<string,HTMLImageElement>()
     const preload=(s:ViewState)=>{
-      const urls=[countdownCard,...s.people.filter(p=>p.active).map(p=>personPhoto(s,p)),assetUrl(s,s.config.logo),assetUrl(s,s.config.starter),
+      const urls=[countdownCard,podiumIntroCard,...s.people.filter(p=>p.active).map(p=>personPhoto(s,p)),assetUrl(s,s.config.logo),assetUrl(s,s.config.starter),
         assetUrl(s,s.config.podiumBackdrop??''),assetUrl(s,s.config.stadiumAd??'')]
       for(const url of urls)if(url&&!loaded.has(url)){const img=new Image();img.src=url;loaded.set(url,img)}
     }
@@ -186,7 +187,8 @@ export function display(app:HTMLElement) {
         catch{fallback('3D 경기장 구성 실패')}
         lastKey=key;needSetup=false;ranking=[]
       }
-      const progress=race?Math.max(0,Math.min(1,(now-race.startsAt)/Math.max(1,race.endsAt-race.startsAt))):0
+      const raceTime=p==='transition'?now:Math.min(now,race?.endsAt??now)
+      const progress=race?Math.max(0,(raceTime-race.startsAt)/Math.max(1,race.endsAt-race.startsAt)):0
       const beat=beats.find(cue=>progress>=Math.max(0,cue.at-.045)&&progress<raceBeats[sport][cue.index].end)
       const event=beat&&p==='racing'?raceBeats[sport][beat.index]:undefined
       const shot=progress>=finishShotAt?'finish':beat?'event':progress>=.15?'leader':'wide'
@@ -194,6 +196,10 @@ export function display(app:HTMLElement) {
       const revealed=p==='podium'&&race?podiumRevealed(race,now):0
       const podiumAt=race?podiumStartAt(race):undefined
       const podiumAge=revealed&&podiumAt!==undefined?(now-podiumAt-(revealed-1)*podiumIntervalMs)/1000:Infinity
+      const transitionVeil=p==='transition'&&podiumAt!==undefined?Math.max(0,1-(podiumAt-now)/420):
+        p==='podium'&&race?.transitionMs&&race.podiumAt===undefined&&podiumAt!==undefined?Math.max(0,1-(now-podiumAt)/420):0
+      const veil=overlay.parentElement!
+      veil.style.setProperty('--podium-veil',String(transitionVeil))
       if(!graphicsLost&&p!=='complete'){
         try {track?.frame(progress,time/1000,p==='podium'?'podium':shot,ranked.slice(0,6).map(x=>x.r),
           starter,revealed,beat,podiumAge,ranked[Math.min(17,ranked.length-1)]?.p)}
@@ -205,9 +211,9 @@ export function display(app:HTMLElement) {
         soundStage=cue
         if(p==='ready')audio.play('opening')
         if(p==='racing'&&race&&now-race.startsAt<700)audio.play('start')
-        if(p==='podium'&&race&&race.podiumAt===undefined&&now-race.endsAt<700)audio.play('finish')
+        if((p==='transition'||p==='podium')&&race&&race.podiumAt===undefined&&now-race.endsAt<700)audio.play('finish')
       }
-      audio.update(s,p==='racing'?'bgm':p==='podium'&&revealed>0?'ceremony':undefined)
+      audio.update(s,p==='racing'?'bgm':p==='transition'||p==='podium'&&revealed>0?'ceremony':undefined)
       if(p==='racing'&&beat&&event&&beat.index>playedBeat&&progress>=beat.at){
         playedBeat=beat.index
         if((progress-beat.at)*(race!.endsAt-race!.startsAt)<700)audio.play(event.sound,sport)
@@ -248,6 +254,8 @@ export function display(app:HTMLElement) {
               '<span class="runner-name">'+medal+esc(person.name)+'</span></li>'
           }).join('')+'</ul></div>'+
           (caption?'<div class="ticker">'+esc(caption)+'</div>':''))
+      }else if(p==='transition'){
+        setMarkup('<div class="podium-intro"><div class="podium-intro-card"><img src="'+esc(podiumIntroCard)+'" alt="시상식"></div></div>')
       }else if(p==='podium'&&race){
         if(revealed>0&&marker!==10+revealed){
           marker=10+revealed

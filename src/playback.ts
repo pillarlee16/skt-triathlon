@@ -132,7 +132,7 @@ export type Runner=ReturnType<typeof trackOrder>[number]
 
 export function position(runner:Runner,time:number) {
   if(time<=0)return 0
-  if(time>=runner.finish)return Math.min(1.10,1+(time-runner.finish)*.66)
+  if(time>=runner.finish)return 1+(time-runner.finish)*.66
   const i=runner.anchors.findIndex(anchor=>anchor.time>=time)
   const a=runner.anchors[i-1], b=runner.anchors[i]
   const t=(time-a.time)/(b.time-a.time)
