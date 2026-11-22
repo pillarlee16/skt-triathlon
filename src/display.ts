@@ -1,26 +1,33 @@
 import {api, ApiError, assetUrl, esc, loginPanel, operatorChannel, personPhoto, poll, type TvStatus, type ViewState} from './client.ts'
-import {audioSlots, currentRace, podiumIntervalMs, podiumRevealed, stage, type Person, type Race} from './model.ts'
+import {audioSlots, currentRace, podiumIntervalMs, podiumRevealed, podiumStartAt, stage, type Person, type Race} from './model.ts'
 import {cuePoints, finishShotAt, position, raceBeats, trackOrder, type Beat, type Runner} from './playback.ts'
 import {assignAvatarStyles, starterStyle, type AvatarStyle} from './avatar-style.ts'
 import countdownCard from './assets/countdown-mascot.webp'
+import winnerCheer from './assets/winner-cheer.mp3'
+import podiumFanfare from './assets/podium-fanfare.mp3'
 
 type Slot=typeof audioSlots[number]
+type Music='bgm'|'ceremony'
+const isMusic=(slot:Slot):slot is Music=>slot==='bgm'||slot==='ceremony'
+const defaultAudio:Partial<Record<Slot,string>>={ceremony:podiumFanfare,cheer:winnerCheer}
 const notes:Record<Slot,number[]>={opening:[196,247,294,392],countdown:[440],start:[523,784],bgm:[130,196,155,196,117,175,147,175],
-  item:[392,523,659],obstacle:[120,85],pass:[340,480],finish:[392,494,587],podium:[392,494,587,784]}
+  item:[392,523,659],obstacle:[120,85],pass:[340,480],finish:[392,494,587],podium:[392,494,587,784],ceremony:[],cheer:[]}
 const countdownHz=[1047,880,660]
 function sound(){
   let context:AudioContext|undefined
   let files:Partial<Record<Slot,HTMLAudioElement>>={}
   let mix={bgm:.35,sfx:.7,muted:false}
   let loop:number|undefined
+  let music:Music|undefined
+  let musicStarted=false
   let notesIndex=0
   function play(type:Slot,sport?:Race['sport'],countdownStep?:number) {
-    const level=mix.muted?0:type==='bgm'?mix.bgm:mix.sfx
+    const level=mix.muted?0:isMusic(type)?mix.bgm:mix.sfx
     if(!context || !level)return
     const audio=files[type]
     if(audio){
       audio.volume=level
-      if(type!=='bgm')audio.currentTime=0
+      if(!isMusic(type))audio.currentTime=0
       void audio.play().catch(()=>tone(type,level,sport,countdownStep))
     }else tone(type,level,sport,countdownStep)
   }
@@ -44,29 +51,48 @@ function sound(){
       wave.start(start);wave.stop(start+.19)
     })
   }
-  function stop(){clearInterval(loop);loop=undefined;files.bgm?.pause()}
+  function stopMusic(){
+    clearInterval(loop);loop=undefined
+    if(music)files[music]?.pause()
+    music=undefined
+    musicStarted=false
+  }
   return {
-    play,stop,
+    play,
+    stop(){
+      stopMusic()
+      for(const audio of Object.values(files))audio.pause()
+    },
     async enable(){context??=new AudioContext();await context.resume()},
     setup(s:ViewState){
       const next:typeof files={}
       for(const slot of audioSlots){
-        const url=assetUrl(s,s.config.audio[slot]??'','audio')
+        const url=assetUrl(s,s.config.audio[slot]??'','audio')||defaultAudio[slot]
         if(!url)continue
         if(files[slot]?.getAttribute('src')===url){next[slot]=files[slot];continue}
         const audio=new Audio(url);audio.preload='auto';audio.loop=slot==='bgm';next[slot]=audio
       }
-      if(next.bgm!==files.bgm)stop()
+      if(music&&next[music]!==files[music])stopMusic()
+      for(const slot of audioSlots)if(next[slot]!==files[slot])files[slot]?.pause()
       files=next
     },
-    update(s:ViewState,racing:boolean){
+    update(s:ViewState,nextMusic:Music|undefined){
       mix=s.volume
-      if(files.bgm)files.bgm.volume=mix.muted?0:mix.bgm
-      for(const slot of audioSlots)if(slot!=='bgm'&&files[slot])files[slot]!.volume=mix.muted?0:mix.sfx
-      if(racing&&context&&loop===undefined){
-        play('bgm')
-        loop=window.setInterval(()=>{if(!files.bgm || files.bgm.paused&&!mix.muted)play('bgm')},260)
-      }else if(!racing&&loop!==undefined)stop()
+      for(const slot of audioSlots)if(files[slot])files[slot]!.volume=mix.muted?0:isMusic(slot)?mix.bgm:mix.sfx
+      if(music!==nextMusic){
+        if(music==='ceremony'){files.cheer?.pause();files.podium?.pause()}
+        stopMusic()
+        music=nextMusic
+        notesIndex=0
+        if(music&&files[music])files[music]!.currentTime=0
+      }
+      if(!music||!context||musicStarted||mix.muted||!mix.bgm)return
+      const slot=music
+      musicStarted=true
+      play(slot)
+      if(slot==='bgm'){
+        loop=window.setInterval(()=>{if(!files.bgm||files.bgm.paused&&!mix.muted)play('bgm')},260)
+      }
     }
   }
 }
@@ -166,7 +192,8 @@ export function display(app:HTMLElement) {
       const shot=progress>=finishShotAt?'finish':beat?'event':progress>=.15?'leader':'wide'
       const ranked=runners.map(r=>({r,p:position(r,progress)})).sort((a,b)=>b.p-a.p||a.r.rank-b.r.rank)
       const revealed=p==='podium'&&race?podiumRevealed(race,now):0
-      const podiumAge=revealed&&race?.podiumAt!==undefined?(now-race.podiumAt-(revealed-1)*podiumIntervalMs)/1000:Infinity
+      const podiumAt=race?podiumStartAt(race):undefined
+      const podiumAge=revealed&&podiumAt!==undefined?(now-podiumAt-(revealed-1)*podiumIntervalMs)/1000:Infinity
       if(!graphicsLost&&p!=='complete'){
         try {track?.frame(progress,time/1000,p==='podium'?'podium':shot,ranked.slice(0,6).map(x=>x.r),
           starter,revealed,beat,podiumAge,ranked[Math.min(17,ranked.length-1)]?.p)}
@@ -178,9 +205,9 @@ export function display(app:HTMLElement) {
         soundStage=cue
         if(p==='ready')audio.play('opening')
         if(p==='racing'&&race&&now-race.startsAt<700)audio.play('start')
-        if(p==='finish'&&race&&now-race.endsAt<700)audio.play('finish')
+        if(p==='podium'&&race&&race.podiumAt===undefined&&now-race.endsAt<700)audio.play('finish')
       }
-      audio.update(s,p==='racing')
+      audio.update(s,p==='racing'?'bgm':p==='podium'&&revealed>0?'ceremony':undefined)
       if(p==='racing'&&beat&&event&&beat.index>playedBeat&&progress>=beat.at){
         playedBeat=beat.index
         if((progress-beat.at)*(race!.endsAt-race!.startsAt)<700)audio.play(event.sound,sport)
@@ -208,8 +235,8 @@ export function display(app:HTMLElement) {
             audio.play('countdown',undefined,count)
           }
         }else setMarkup('')
-      }else if(p==='racing'||p==='finish'){
-        if(p==='finish'||!ranking.length||time-lastRanking>=600){ranking=ranked.slice(0,10).map(({r})=>r);lastRanking=time}
+      }else if(p==='racing'){
+        if(!ranking.length||time-lastRanking>=600){ranking=ranked.slice(0,10).map(({r})=>r);lastRanking=time}
         const savedCaption=s.config.captions[sport]
         const caption=beat?.index===1&&!(sport==='cycling'&&savedCaption==='급커브! 선두권 대혼전')?savedCaption||event?.title:event?.title
         setMarkup('<div class="leaderboard"><ul role="list" aria-label="경기 순위">'+ranking.map(({person},index)=>{
@@ -222,7 +249,11 @@ export function display(app:HTMLElement) {
           }).join('')+'</ul></div>'+
           (caption?'<div class="ticker">'+esc(caption)+'</div>':''))
       }else if(p==='podium'&&race){
-        if(revealed>0&&marker!==10+revealed){marker=10+revealed;audio.play('podium')}
+        if(revealed>0&&marker!==10+revealed){
+          marker=10+revealed
+          audio.play('podium')
+          if(revealed===3)audio.play('cheer')
+        }
         const backdrop=tv.graphics==='html'?assetUrl(s,s.config.podiumBackdrop??''):''
         setMarkup('<div class="podium'+(tv.graphics==='3d'?' podium-3d':'')+'">'+
           (backdrop?'<img class="podium-backdrop" src="'+esc(backdrop)+'" alt="">':'')+
@@ -240,7 +271,7 @@ export function display(app:HTMLElement) {
         }).join('')+'</div></div>')
       }else{
         const active=s.people.filter(x=>x.active).length
-        setMarkup('<div class="center"><div class="eyebrow">'+(p==='complete'?'FINISH':'TRIATHLON LUCKY DRAW')+'</div><h1>'+esc(p==='complete'?'축하합니다':p==='ready'?s.config.names[sport]:s.config.title)+'</h1><p>'+esc(p==='complete'?'철인3종 럭키드로우 종료':p==='ready'?'참가 '+active+'명 · 출발 대기':'경기 준비 중')+'</p></div>')
+        setMarkup('<div class="center'+(p==='ready'?' start-ready':'')+'"><div class="eyebrow">'+(p==='complete'?'FINISH':'TRIATHLON LUCKY DRAW')+'</div><h1>'+esc(p==='complete'?'축하합니다':p==='ready'?s.config.names[sport]:s.config.title)+'</h1><p>'+esc(p==='complete'?'철인3종 럭키드로우 종료':p==='ready'?'참가 '+active+'명 · 출발 대기':'경기 준비 중')+'</p></div>')
       }
     }
     tick=requestAnimationFrame(frame)

@@ -28,7 +28,7 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
     case 'start':
     case 'emergency': {
       if (race && action.type==='emergency') {
-        requireRule(race.podiumAt===undefined,'이미 발표 중입니다.')
+        requireRule(stage(s,now)!=='podium','이미 발표 중입니다.')
         race.endsAt=Math.min(now,race.endsAt)
         race.podiumAt=now+podiumLeadMs
         break
@@ -49,23 +49,22 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       const attempt:Race={id:randomUUID(),sport,seed:pick(2**31),startsAt,createdAt:now,redrawId:s.ready.redrawId,eligibleCount,
         endsAt:emergency ? now : startsAt+s.config.duration[sport]*1000,winners}
       if (emergency) attempt.podiumAt=now+podiumLeadMs
+      else attempt.finishers=Math.min(10,s.people.filter(p=>p.active).length)
       s.races.push(attempt)
       s.current=attempt.id
       s.locked=true
       delete s.ready
       break
     }
-    case 'next':
+    case 'next': {
       requireRule(race && now>=race.endsAt,'결승 후 다음 화면으로 넘어갈 수 있습니다.')
-      if (race.podiumAt===undefined) race.podiumAt=now+podiumLeadMs
-      else {
-        requireRule(now>=podiumReadyAt(race),'발표가 끝날 때까지 기다려 주세요.')
-        race.completedAt=now
-        delete s.current
-        const nextSport=sports[sports.indexOf(race.sport)+1]
-        if(nextSport) s.ready={id:randomUUID(),sport:nextSport,redrawId:race.redrawId}
-      }
+      requireRule(now>=podiumReadyAt(race),'발표가 끝날 때까지 기다려 주세요.')
+      race.completedAt=now
+      delete s.current
+      const nextSport=sports[sports.indexOf(race.sport)+1]
+      if(nextSport) s.ready={id:randomUUID(),sport:nextSport,redrawId:race.redrawId}
       break
+    }
     case 'reset':
       requireRule(stage(s,now)==='complete','세 종목을 모두 마친 뒤 다시 시작할 수 있습니다.')
       s.races=[]

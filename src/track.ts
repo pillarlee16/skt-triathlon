@@ -12,6 +12,11 @@ import {cyclingProps,runningBallDistance,runningBallLane,runningProps} from './r
 
 const tireRadius=.37
 const axleOffset=.64
+const launchDepth=42
+const launchMerge=.09
+const launchEnd=.17
+const launchSpacing=1.28
+const launchZ=(distance:number)=>-world*distance+launchDepth*Math.max(0,1-distance/launchEnd)
 const lighting={
   swimming:{sky:0xebf7ff,ground:0x87b8ca,fill:1.18,sun:0xfff2df,key:3.4,keyX:-11,rim:0xc3edff,edge:.83,exposure:1.10},
   cycling:{sky:0xe9f2ff,ground:0xb6adc8,fill:1.27,sun:0xffeedc,key:3.35,keyX:12,rim:0xddeaff,edge:.87,exposure:1.12},
@@ -74,6 +79,7 @@ export function createTrack(host:HTMLElement) {
   const target=new T.Vector3()
   let sport:Sport='running'
   let cameraReady=false, cameraPodium=false
+  let launchWidth=0
   let generation=0
   const goal=new T.Vector3(), look=new T.Vector3()
   function dispose(group:T.Group) {
@@ -167,6 +173,54 @@ export function createTrack(host:HTMLElement) {
     scene.fog=new T.Fog(palette.horizon,62,168)
     stageFill.visible=podium
     animateCourse=buildCourse(course,sport,podium,sun.position,art)
+    launchWidth=podium?0:Math.max(24,(roster.length-1)*launchSpacing+3)
+    if(!podium){
+      const apron=new T.Shape()
+      apron.moveTo(-launchWidth/2,launchDepth+2)
+      apron.lineTo(launchWidth/2,launchDepth+2)
+      for(const side of [1,-1]){
+        for(let step=0;step<=12;step++){
+          const distance=launchMerge*(side===1?step:12-step)/12
+          const halfWidth=T.MathUtils.lerp(launchWidth/2,11.7,T.MathUtils.smoothstep(distance,0,launchMerge))
+          apron.lineTo(side*halfWidth,launchZ(distance))
+        }
+        if(side===1){
+          apron.lineTo(11.7,0)
+          apron.lineTo(-11.7,0)
+        }
+      }
+      const surface=new T.Mesh(new T.ShapeGeometry(apron),new T.MeshStandardMaterial({color:palette.road,roughness:.72,side:T.DoubleSide}))
+      surface.rotation.x=Math.PI/2
+      surface.position.y=.023
+      course.add(surface)
+      box(launchWidth+3,.24,12,0,-.12,launchDepth+6,palette.ground)
+      box(launchWidth+2,.48,.32,0,.24,launchDepth+10,palette.accent)
+      const line=paintedPanel(launchWidth,.85,ctx=>{
+        const cells=Math.ceil(launchWidth/.55)
+        for(let i=0;i<cells;i++)for(let row=0;row<2;row++){
+          ctx.fillStyle=(i+row)%2?'#fff8df':'#33435c'
+          ctx.fillRect(Math.floor(i*ctx.canvas.width/cells),row*ctx.canvas.height/2,
+            Math.ceil(ctx.canvas.width/cells)+1,ctx.canvas.height/2)
+        }
+      })
+      line.rotation.x=-Math.PI/2
+      line.position.set(0,.044,launchDepth)
+      course.add(line)
+      const guides:number[]=[]
+      for(let division=-4;division<=4;division++){
+        for(let step=0;step<12;step++){
+          for(const part of [step/12,(step+.58)/12]){
+            const distance=launchMerge*part
+            const width=T.MathUtils.lerp(launchWidth-2,21,T.MathUtils.smoothstep(distance,0,launchMerge))
+            guides.push(width*division/10,.048,launchZ(distance)-.5)
+          }
+        }
+      }
+      course.add(new T.LineSegments(
+        new T.BufferGeometry().setAttribute('position',new T.Float32BufferAttribute(guides,3)),
+        new T.LineBasicMaterial({color:palette.line,transparent:true,opacity:.45})
+      ))
+    }
     if(swim){
       const wakePaint=new T.MeshBasicMaterial({color:0xd7faf6,transparent:true,opacity:.46,depthWrite:false,side:T.DoubleSide})
       swimmerWakes=new T.InstancedMesh(swimmingWake(),wakePaint,runners.length*2)
@@ -409,18 +463,19 @@ export function createTrack(host:HTMLElement) {
         const spring=(delta+.009)/.036
         hurdle.kick=Math.max(hurdle.kick,Math.sin(spring*Math.PI*2.2)*(1-spring)*.83)
       }
-      const row=Math.floor(r.lane/15)*1.65*Math.max(0,1-t*5)
       const lane=laneX(r),side=lane===0?(r.lane%2?1:-1):Math.sign(lane)
+      const launch=T.MathUtils.smoothstep(distance,0,launchMerge)
+      const startSlot=(r.lane-(runners.length-1)/2)*launchSpacing
       const steering=early&&bike?reaction*(1-T.MathUtils.smoothstep(Math.abs(lane),2,5)):0
       const dodge=ballLane===undefined?0:
         Math.exp(-(((distance-runningBallDistance)/.027)**2))*(1-T.MathUtils.smoothstep(Math.abs(lane-ballLane),1.1,3.7))
       const surge=late&&!swim&&r.affected?reaction:0
-      const line=lane+.27*Math.sin(t*13+r.lane)+stumble*(swim?.55:.31)*Math.sin(r.lane)
+      const line=T.MathUtils.lerp(startSlot,lane+.27*Math.sin(t*13+r.lane),launch)+stumble*(swim?.55:.31)*Math.sin(r.lane)
         +side*(2.24+Math.sin(delta*134)*.32)*steering+side*dodge*1.45+side*surge*(bike?.84:.57)
       const point=coursePoint(sport,distance,line)
       const next=coursePoint(sport,distance+.003,line)
       const x=podium?podiumX[r.rank]:point.x
-      const z=podium?-world+4:point.z+row
+      const z=podium?-world+4:launchZ(distance)
       const bounce=r.rank===0?.41*Math.abs(Math.sin(time*4.1))**1.4:.030*Math.sin(time*4+r.rank)
       const yaw=podium?Math.PI:-Math.atan2(next.x-point.x,point.z-next.z)+side*(steering*.21*Math.cos(delta*134)+dodge*.15)
       const along=bumpProfile?(x-bumpProfile.x)*bumpProfile.sin+(z-bumpProfile.z)*bumpProfile.cos:0
@@ -622,6 +677,16 @@ export function createTrack(host:HTMLElement) {
       const height=T.MathUtils.lerp(5.5+opening*1.8+event*2.1+chaseGap*.13,4.8,approach)
       goal.set(ahead.x+side,ahead.y+height,ahead.z)
       target.set(x+2,y+.75,z+2.1+chaseGap*.46)
+      const launch=1-T.MathUtils.smoothstep(t,0,.18)
+      goal.x=T.MathUtils.lerp(goal.x,0,launch)
+      goal.y+=launch*launchWidth*.37
+      goal.z=T.MathUtils.lerp(goal.z,launchZ(p)-launchWidth*.66,launch)
+      target.z+=launchZ(p)-z
+      target.x*=1-launch
+      if(scene.fog instanceof T.Fog){
+        scene.fog.near=62+launch*launchWidth*.62
+        scene.fog.far=168+launch*launchWidth
+      }
     }
     const ease=cameraReady?1-Math.exp(-dt*4.2):1
     cameraReady=true

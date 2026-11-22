@@ -105,8 +105,13 @@ export function trackOrder(people:Person[],race:Race) {
   const closingChasers=new Map(order.slice(Math.round(count*11/90),Math.round(count*23/90))
     .filter(runner=>runner.winner===undefined).slice(0,Math.round(count*2/90))
     .map((runner,index)=>[runner.lane,index]))
+  const closingPlaces=new Map(order.filter(runner=>runner.winner===undefined)
+    .sort((a,b)=>Number(!closingChasers.has(a.lane))-Number(!closingChasers.has(b.lane)))
+    .slice(0,Math.max(0,(race.finishers??3)-3)).map((runner,index)=>[runner.lane,index]))
   return seeded.sort((a,b)=>(a.winner??3)-(b.winner??3)||a.draw-b.draw||a.lane-b.lane).map((runner,rank)=>{
-    const finish=runner.winner===undefined?1.045+rank*.0016:.958+runner.winner*.021
+    const closingPlace=closingPlaces.get(runner.lane)
+    const finish=runner.winner!==undefined?(race.finishers===undefined?.958:.928)+runner.winner*.021:
+      closingPlace!==undefined?1-((race.finishers??3)-4-closingPlace)*.004:1.045+rank*.0016
     const anchors=curves[runner.lane]
     const last=lastRanks.get(runner.lane)!
     const contender=last<Math.max(1,Math.round(count*5/90))

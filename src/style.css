@@ -462,6 +462,7 @@ th {
   font-size: clamp(2rem,6vw,7rem);
   letter-spacing: -.065em;
 }
+.center.start-ready { top: 27%; }
 
 .center p {
   margin: 0;

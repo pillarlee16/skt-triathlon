@@ -1,5 +1,5 @@
 import {DatabaseSync} from 'node:sqlite'
-import {initial,type Mode,type State} from '../src/model.ts'
+import {initial,sports,type Mode,type State} from '../src/model.ts'
 
 export type StoredFile={id:string;bytes:ArrayBuffer;mime:string}
 
@@ -20,7 +20,14 @@ export function openStore(database:string,mode:Mode){
   const addFile=db.prepare('INSERT INTO event_file VALUES (?,?,?)')
   const file=db.prepare('SELECT mime,data FROM event_file WHERE id=?')
   return {
-    read:()=>JSON.parse(state.get()!.data as string) as State,
+    read(){
+      const saved=JSON.parse(state.get()!.data as string) as State
+      if(saved.raceTimingVersion===undefined){
+        for(const sport of sports)if(saved.config.duration[sport]===40)saved.config.duration[sport]=20
+        saved.raceTimingVersion=1
+      }
+      return saved
+    },
     file:(id:string)=>file.get(id) as {mime:string;data:Uint8Array}|undefined,
     write(next:State,upload?:StoredFile){
       db.exec('BEGIN IMMEDIATE')

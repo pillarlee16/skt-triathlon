@@ -665,7 +665,7 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
     }
     for(const u of [0,1]){
       const {x,y,z}=at(u)
-      for(let i=0;i<22;i++)for(let row=0;row<2;row++)
+      if(u===1)for(let i=0;i<22;i++)for(let row=0;row<2;row++)
         box((i+row)%2?0xfff8df:0x3d3859,x-10.5+i,y+.025,z+row*.68,1,.04,.68)
       const arch=u===1?7.3:5.28
       const post=u===1?13:11.6

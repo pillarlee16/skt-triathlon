@@ -1,7 +1,7 @@
 export const sports = ['swimming', 'cycling', 'running'] as const
 export type Sport = typeof sports[number]
 export const labels = {swimming:'수영', cycling:'사이클', running:'달리기'}
-export const audioSlots = ['opening','countdown','start','bgm','item','obstacle','pass','finish','podium'] as const
+export const audioSlots = ['opening','countdown','start','bgm','item','obstacle','pass','finish','podium','ceremony','cheer'] as const
 export const countdownMs = 3000
 export const startLeadMs = 2500
 export const podiumLeadMs = 1000
@@ -20,7 +20,7 @@ export type Config = {
 export type Winner = {id:string; name:string; prize:string; image:string}
 export type Race = {
   id:string; sport:Sport; seed:number; startsAt:number; endsAt:number
-  winners:Winner[]; podiumAt?:number; completedAt?:number
+  winners:Winner[]; podiumAt?:number; completedAt?:number; finishers?:number
   invalidated?:{at:number; reason:string; redrawId?:string}
   redrawId?:string
   createdAt?:number
@@ -32,6 +32,7 @@ export type State = {
   current?:string
   pairing?:{hash:string; expires:number; readyId:string; used?:boolean} // Legacy SQLite snapshots
   locked:boolean; volume:{bgm:number; sfx:number; muted:boolean}
+  raceTimingVersion?:1
   requests:Record<string,number>
 }
 export type Action =
@@ -49,25 +50,25 @@ export function initial(mode:Mode):State {
   return {
     revision:0, mode, people:[], assets:[],
     prizes:{swimming:{name:'',image:''},cycling:{name:'',image:''},running:{name:'',image:''}},
-    config:{title:'SKT 철인3종 럭키드로우', names:{...labels}, duration:{swimming:40,cycling:40,running:40},
+    config:{title:'SKT 철인3종 럭키드로우', names:{...labels}, duration:{swimming:20,cycling:20,running:20},
       captions:{swimming:'대형 파도! 선두권 대혼전',cycling:'과속방지턱! 선두권 대혼전',running:'쿠션 허들! 선두권 대혼전'},
       logo:'',starter:'',audio:{}},
-    races:[],locked:false,volume:{bgm:.35,sfx:.7,muted:false},requests:{}
+    races:[],locked:false,volume:{bgm:.35,sfx:.7,muted:false},requests:{},raceTimingVersion:1
   }
 }
 export const preparationLocked=(s:Pick<State,'locked'|'races'>)=>s.locked||s.races.length>0
 export const canPrepare=(s:Pick<State,'people'|'prizes'>)=>
   s.people.filter(p=>p.active).length>=9&&sports.every(k=>s.prizes[k].name.trim())
 export const currentRace = (s:Pick<State,'races'|'current'>) => s.races.find(r=>r.id===s.current && !r.invalidated)
-export const podiumReadyAt = (race:Race) => (race.podiumAt??Infinity)+2*podiumIntervalMs+podiumHoldMs
-export const podiumRevealed = (race:Race,now:number) => Math.max(0,Math.min(3,1+Math.floor((now-(race.podiumAt??Infinity))/podiumIntervalMs)))
+export const podiumStartAt = (race:Race) => race.podiumAt??race.endsAt
+export const podiumReadyAt = (race:Race) => podiumStartAt(race)+2*podiumIntervalMs+podiumHoldMs
+export const podiumRevealed = (race:Race,now:number) => Math.max(0,Math.min(3,1+Math.floor((now-podiumStartAt(race))/podiumIntervalMs)))
 export function stage(s:Pick<State,'races'|'current'|'ready'>, now:number) {
   const race = currentRace(s)
   if (race) {
-    if (race.podiumAt !== undefined) return 'podium'
+    if (race.podiumAt !== undefined || now>=race.endsAt) return 'podium'
     if (now < race.startsAt) return 'countdown'
-    if (now < race.endsAt) return 'racing'
-    return 'finish'
+    return 'racing'
   }
   if (s.ready) return 'ready'
   return s.races.some(r=>r.sport==='running' && r.completedAt && !r.invalidated) ? 'complete' : 'setup'

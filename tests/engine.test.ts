@@ -19,15 +19,16 @@ test('90, 87, 84 eligible, nine unique winners, official CSV',()=>{
     s=apply(s,{type:'start'},base+i*50000+1,max=>{ranges.push(max);return 0})
     assert.deepEqual(ranges.slice(0,3),[90-i*3,89-i*3,88-i*3])
     const race=currentRace(s)!
-    assert.equal(race.endsAt-race.startsAt,40000)
+    assert.equal(race.endsAt-race.startsAt,20000)
     assert.equal(race.eligibleCount,90-i*3)
     const runners=trackOrder(s.people,race)
     assert.equal(runners.length,90)
-    assert.deepEqual(runners.filter(r=>position(r,1)>=1).map(r=>r.person.id),race.winners.map(w=>w.id))
+    assert.equal(runners.filter(r=>position(r,1)>=1).length,10)
     assert.throws(()=>apply(s,{type:'next'},race.endsAt-1))
-    s=apply(s,{type:'next'},race.endsAt)
-    const announced=currentRace(s)!
-    const at=announced.podiumAt!
+    assert.equal(stage(s,race.endsAt-1),'racing')
+    assert.equal(stage(s,race.endsAt),'podium')
+    const announced=race
+    const at=race.endsAt
     assert.deepEqual([at-1,at,at+podiumIntervalMs,at+2*podiumIntervalMs].map(now=>podiumRevealed(announced,now)),[0,1,2,3])
     assert.throws(()=>apply(s,{type:'next'},podiumReadyAt(announced)-1))
     s=apply(s,{type:'next'},podiumReadyAt(announced))
@@ -75,8 +76,10 @@ test('exactly the expected runners cross before the end',()=>{
   const started=apply(setup,{type:'start'},base)
   const race=currentRace(started)!
   const sorted=trackOrder(started.people,race)
-  assert.deepEqual(sorted.filter(r=>position(r,1)>=1).map(r=>r.person.id),race.winners.map(w=>w.id))
-  assert.deepEqual(sorted.filter(r=>position(r,.98)>=1).map(r=>r.person.id),race.winners.slice(0,2).map(w=>w.id))
+  assert.equal(sorted.filter(r=>position(r,.9999)>=1).length,9)
+  assert.equal(sorted.filter(r=>position(r,1)>=1).length,10)
+  assert.deepEqual(sorted.filter(r=>position(r,.971)>=1).map(r=>r.person.id),race.winners.map(w=>w.id))
+  assert.ok(sorted.every(r=>position(r,0)===0))
 })
 test('race animation seeds alter intermediate standings without changing draw or finish',()=>{
   const ready=apply(fixture(),{type:'prepare',sport:'swimming'},base)
@@ -88,7 +91,7 @@ test('race animation seeds alter intermediate standings without changing draw or
   const top=(runners:typeof standings[number],progress:number)=>runners.slice()
     .sort((a,b)=>position(b,progress)-position(a,progress)).slice(0,5).map(r=>r.person.id)
   assert.notDeepEqual(top(standings[0],.52),top(standings[1],.52))
-  for(const runners of standings)assert.deepEqual(runners.filter(r=>position(r,1)>=1).map(r=>r.person.id),races[0].winners.map(w=>w.id))
+  for(const runners of standings)assert.deepEqual(runners.filter(r=>position(r,.971)>=1).map(r=>r.person.id),races[0].winners.map(w=>w.id))
 })
 test('direct preparation uses stable IDs and rejects edits after drawing',()=>{
   let state=initial('rehearsal')
@@ -156,7 +159,7 @@ test('three course stories change leaders and keep a deterministic photo finish'
         previous=distance
       }
     }
-    for(const [i,t] of [.959,.98,1].entries()){
+    for(const [i,t] of [.929,.95,.971].entries()){
       assert.deepEqual(runners.filter(r=>position(r,t)>=1).map(r=>r.person.id),
         race.winners.slice(0,i+1).map(w=>w.id))
     }
