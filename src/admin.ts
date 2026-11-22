@@ -62,7 +62,7 @@ export function admin(app:HTMLElement) {
       state=result.state
       connected=true
       operatorChannel.postMessage({type:'refresh'})
-      if(action.type==='prepare')screen='operate'
+      if(action.type==='prepare'||action.type==='reset')screen='operate'
       if(action.type==='savePerson'){
         drafts.delete(action.id?'person:'+action.id:'new-person')
         editingPerson=undefined
@@ -72,7 +72,7 @@ export function admin(app:HTMLElement) {
         if(editingPerson===action.id)editingPerson=undefined
       }
       if(action.type==='prizeNames')for(const sport of sports)drafts.delete(sport)
-      message='저장되었습니다.'
+      message=action.type==='reset'?'수영 출발 대기 화면으로 돌아갔습니다.':'저장되었습니다.'
       return true
     } catch(error) {
       if(!(error instanceof ApiError) || error.status>=500) {
@@ -153,7 +153,8 @@ export function admin(app:HTMLElement) {
           (x.invalidated.redrawId?'<p>새 결과 · '+esc(s.races.find(y=>y.redrawId===x.invalidated?.redrawId&&y.sport===x.sport)?.winners.map((w,i)=>(i+1)+'위 '+w.id+' '+w.name).join(' / ')||'재실행 또는 결승 대기')+'</p>':''):
           '<button data-redraw="'+x.sport+'" class="danger">'+esc(s.config.names[x.sport])+' 재추첨</button>')+'</article>').join(''):'<p>추첨 기록이 없습니다.</p>')+'</section>'
     const csvLink='<a class="button" href="'+esc(endpoint('csv'))+'">CSV 다운로드</a>'
-    const summary=p==='complete'?'<section class="panel"><div class="results-heading"><h2>최종 당첨 결과</h2>'+csvLink+'</div><div class="stats">'+sports.map(k=>{
+    const summary=p==='complete'?'<section class="panel"><div class="results-heading"><h2>최종 당첨 결과</h2><div class="actions">'+csvLink+
+      '<button data-act="reset">처음부터 다시 시작</button></div></div><div class="stats">'+sports.map(k=>{
       const result=s.races.find(attempt=>attempt.sport===k&&!attempt.invalidated)
       return '<div><strong>'+esc(s.config.names[k])+'</strong><ol>'+result?.winners.map(w=>'<li>'+esc(w.name)+' · '+esc(w.prize)+'</li>').join('')+'</ol></div>'
     }).join('')+'</div></section>':''
@@ -190,6 +191,7 @@ export function admin(app:HTMLElement) {
     app.querySelectorAll<HTMLButtonElement>('[data-act]').forEach(b=>b.onclick=()=>{
       const type=b.dataset.act as Action['type']
       if(type==='emergency'&&!confirm('비상 발표로 전환할까요?'))return
+      if(type==='reset'&&!confirm('이번 경기와 당첨 기록을 지우고 수영 출발 대기로 돌아갈까요? 참가자와 행사 설정은 유지됩니다.'))return
       void act(type==='prepare'?{type,sport:b.dataset.sport as Sport}:{type} as Action)
     })
     app.querySelectorAll<HTMLButtonElement>('[data-redraw]').forEach(b=>b.onclick=()=>{

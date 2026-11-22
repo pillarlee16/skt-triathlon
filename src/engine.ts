@@ -1,5 +1,5 @@
 import {randomInt, randomUUID} from 'node:crypto'
-import {currentRace, findAsset, preparationLocked, sports, audioSlots, countdownMs, startLeadMs, podiumLeadMs, podiumReadyAt, type Action, type State, type Race, type Sport} from './model.ts'
+import {currentRace, findAsset, preparationLocked, sports, stage, audioSlots, countdownMs, startLeadMs, podiumLeadMs, podiumReadyAt, type Action, type State, type Race, type Sport} from './model.ts'
 
 export class RuleError extends Error {}
 const requireRule: (ok:unknown, message:string)=>asserts ok = (ok,message)=>{
@@ -65,6 +65,13 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
         const nextSport=sports[sports.indexOf(race.sport)+1]
         if(nextSport) s.ready={id:randomUUID(),sport:nextSport,redrawId:race.redrawId}
       }
+      break
+    case 'reset':
+      requireRule(stage(s,now)==='complete','세 종목을 모두 마친 뒤 다시 시작할 수 있습니다.')
+      s.races=[]
+      delete s.current
+      s.locked=false
+      s.ready={id:randomUUID(),sport:'swimming'}
       break
     case 'redraw': {
       requireRule(validSport(action.sport) && nonempty(action.reason,300),'재추첨 사유를 입력하세요.')

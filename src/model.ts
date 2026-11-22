@@ -36,7 +36,7 @@ export type State = {
 }
 export type Action =
   | {type:'prepare'; sport:Sport}
-  | {type:'start'|'emergency'|'next'}
+  | {type:'start'|'emergency'|'next'|'reset'}
   | {type:'redraw'; sport:Sport; reason:string}
   | {type:'savePerson'; id?:string; name:string}
   | {type:'removePerson'; id:string}
