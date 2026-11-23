@@ -171,7 +171,7 @@ test('saved races still replay their original course checkpoints and finish',()=
   }
 })
 
-test('item races replay seven lane events, change pace and still finish in draw order',()=>{
+test('new races replay three course beats and seven lane events in draw order',()=>{
   const seeds=[0,17,42,91827,2147483647]
   const fixtureState=fixture()
   for(const sport of sports){
@@ -183,7 +183,7 @@ test('item races replay seven lane events, change pace and still finish in draw 
       if(!ready.ready)ready=apply(ready,{type:'prepare',sport},base)
       const state=apply(ready,{type:'start'},base,max=>max===2**31?seed:0)
       const race=currentRace(state)!
-      assert.equal(race.playbackVersion,3)
+      assert.equal(race.playbackVersion,4)
       const runners=trackOrder(state.people,race)
       assert.deepEqual(trackOrder(state.people,structuredClone(race)),runners)
       const events=raceEvents(runners)
@@ -191,6 +191,15 @@ test('item races replay seven lane events, change pace and still finish in draw 
       firstEventTimes.add(events[0].at)
       assert.ok(events[0].appears<.15&&events.at(-1)!.ends>.75)
       assert.ok([3,4].includes(events.filter(event=>event.kind==='item').length))
+      const beats=cuePoints(sport,runners)
+      assert.deepEqual(events.map(event=>beats.filter(beat=>beat.at<event.at).length),[0,0,1,1,2,2,3])
+      for(const beat of beats){
+        assert.ok(Math.abs(position(beat.runner,beat.at)-raceBeats[sport][beat.index].gate)<.001)
+        const reactions=runners.flatMap(r=>r.courseEffects??[]).filter(effect=>effect.index===beat.index)
+        assert.ok(reactions.length>=2)
+        assert.ok(reactions.every(effect=>effect.at<effect.ends&&
+          (raceBeats[sport][beat.index].sound==='item'?effect.strength>0:effect.strength<0)))
+      }
       const rankAt=(target:Runner,time:number)=>1+runners.filter(r=>position(r,time)>position(target,time)).length
       for(const [index,event] of events.entries()){
         const target=runners.find(r=>r.person.id===event.runnerId)!

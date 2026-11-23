@@ -148,7 +148,7 @@ export function createTrack(host:HTMLElement) {
   const podiumX=[0,-3.7,3.7]
   const podiumHeight=[1.15,.82,.56]
   function setup(kind:Sport,roster:Runner[],photo:(person:Person)=>HTMLImageElement|undefined,
-    appearance:(person:Person)=>AvatarStyle,podium=false,art?:HTMLImageElement) {
+    appearance:(person:Person)=>AvatarStyle,podium=false,art?:HTMLImageElement,showCourseBeats=true) {
     if(kind!==sport||podium!==cameraPodium)cameraReady=false
     cameraPodium=podium
     generation++; sport=kind;runners=roster
@@ -238,7 +238,8 @@ export function createTrack(host:HTMLElement) {
       dynamicProps=itemRaceProps(sport,events,launchZ)
       course.add(dynamicProps.group)
       for(const event of events)eventPoses.set(event.runnerId,{x:0,y:0,z:0,yaw:0,distance:0})
-    }else if(swim){
+    }
+    if(showCourseBeats&&swim){
       wave=rollingWave();wave.mesh.visible=false;course.add(wave.mesh)
       swimItems=poolItems()
       for(const item of swimItems){item.visible=false;course.add(item)}
@@ -246,7 +247,7 @@ export function createTrack(host:HTMLElement) {
         new T.MeshBasicMaterial({color:0xdafbfb,transparent:true,opacity:.53,depthWrite:false}),4)
       itemRipples.visible=false;itemRipples.frustumCulled=false
       itemRipples.instanceMatrix.setUsage(T.DynamicDrawUsage);course.add(itemRipples)
-    }else if(bike){
+    }else if(showCourseBeats&&bike){
       cycleProps=cyclingProps();course.add(cycleProps.group)
       const gate=raceBeats[sport][1].gate
       const point=coursePoint(sport,gate), next=coursePoint(sport,gate+.002)
@@ -255,7 +256,7 @@ export function createTrack(host:HTMLElement) {
       bump.rotation.y=-Math.atan2(next.x-point.x,point.z-next.z)
       bumpProfile={x:point.x,z:point.z,sin:Math.sin(bump.rotation.y),cos:Math.cos(bump.rotation.y)}
       course.add(bump)
-    }else if(!podium) {
+    }else if(showCourseBeats&&!podium) {
       stadiumProps=runningProps();course.add(stadiumProps.group)
       const gate=raceBeats.running[1].gate
       const shadeGeometry=new T.PlaneGeometry(1.55,.99).rotateX(-Math.PI/2)
@@ -456,7 +457,7 @@ export function createTrack(host:HTMLElement) {
     if(frameAverage>33&&dpr>.85&&w&&h){
       dpr=Math.max(.85,dpr-.15);renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);frameAverage=25
     }
-    const gate=event?.gate??(beat?raceBeats[sport][beat.index].gate:0)
+    const gate=beat?raceBeats[sport][beat.index].gate:event?.gate??0
     const active=!podium&&(beat!==undefined||event!==undefined)
     const early=active&&beat?.index===0, middle=active&&beat?.index===1, late=active&&beat?.index===2
     const ballLane=early&&stadiumProps&&beat&&t<=beat.at+.094?runningBallLane(t,beat.at):undefined
@@ -467,14 +468,16 @@ export function createTrack(host:HTMLElement) {
     runners.forEach((r,i)=>{
       const distance=position(r,t)
       const moving=!podium&&t>0
-      const force=r.events?.reduce((sum,incident)=>sum+eventForce(incident,t),0)??0
+      const force=(r.events?.reduce((sum,incident)=>sum+eventForce(incident,t),0)??0)
+        +(r.courseEffects?.reduce((sum,incident)=>sum+eventForce(incident,t),0)??0)
+      const courseAffected=r.courseEffects?.some(incident=>incident.index===beat?.index)??r.affected
       const phase=time*(swim?8:bike?14:14.4)+r.lane
       const hurdle=middle?hurdles[r.lane%15]:undefined
       const delta=distance-(hurdle?.distance??gate)
       const eventWidth=hurdle ? .018 : .031
       const reaction=active?Math.exp(-((delta/eventWidth)**2)):0
-      const stumble=Math.max(-force*1.85,middle&&r.affected?reaction:0)
-      if(hurdle&&r.affected&&delta>-.009&&delta<.027){
+      const stumble=Math.max(-force*1.85,middle&&courseAffected?reaction:0)
+      if(hurdle&&courseAffected&&delta>-.009&&delta<.027){
         const spring=(delta+.009)/.036
         hurdle.kick=Math.max(hurdle.kick,Math.sin(spring*Math.PI*2.2)*(1-spring)*.83)
       }
@@ -484,7 +487,7 @@ export function createTrack(host:HTMLElement) {
       const steering=early&&bike?reaction*(1-T.MathUtils.smoothstep(Math.abs(lane),2,5)):0
       const dodge=ballLane===undefined?0:
         Math.exp(-(((distance-runningBallDistance)/.027)**2))*(1-T.MathUtils.smoothstep(Math.abs(lane-ballLane),1.1,3.7))
-      const surge=Math.max(force*1.7,late&&!swim&&r.affected?reaction:0)
+      const surge=Math.max(force*1.7,late&&!swim&&courseAffected?reaction:0)
       const line=T.MathUtils.lerp(startSlot,lane+.27*Math.sin(t*13+r.lane),launch)+stumble*(swim?.55:.31)*Math.sin(r.lane)
         +side*(2.24+Math.sin(delta*134)*.32)*steering+side*dodge*1.45+(force===0?side*surge*(bike?.84:.57):0)
       const point=coursePoint(sport,distance,line)
@@ -647,7 +650,8 @@ export function createTrack(host:HTMLElement) {
       if(!item.visible||!beat)return
       const point=coursePoint(sport,raceBeats[sport][index].gate)
       const phase=T.MathUtils.clamp((t-beat.at+.045)/.12,0,1)
-      item.position.set(point.x+(i===0?1:-1)*(9.4-phase*7.3),-.035+Math.sin(time*5+i)*.20,point.z+phase*(i===0?5:2))
+      const offset=dynamicProps&&i===0?-1.5-phase*3:phase*(i===0?5:2)
+      item.position.set(point.x+(i===0?1:-1)*(9.4-phase*7.3),-.035+Math.sin(time*5+i)*.20,point.z+offset)
       item.rotation.set(Math.sin(time*4)*.09,i===0?-.24:Math.PI+.25,Math.sin(time*4+i)*.16)
       item.scale.setScalar(i===0?1.18:1.25)
       if(itemRipples){

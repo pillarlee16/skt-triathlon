@@ -358,7 +358,15 @@
 
 - 새 경주는 결승 접근 때부터 추격권과 후미의 진행 속도에 차이를 주고 선수별 변화폭을 시드로 정합니다. 후미 30명이 같은 지점으로 수렴하던 문제가 해소됐습니다. 기존 저장 경기의 재생 경로와 새 경기의 결승 선두 6명 경로를 보존했습니다.
 - 세 종목 가상 90명 경기 300회를 비교했습니다. 결승 직전 구간에서 후미 30명의 진행 방향 분포가 평균 약 8.2m로 넓어졌고, 1m 구간의 최대 인원은 평균 30명에서 약 5명으로 줄었습니다. 결승 1~3위는 모두 추첨 순서와 일치했습니다.
-- `node .local/finish-approach-qa.mjs http://127.0.0.1:5220 output/playwright/finish-field-spread`와 `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/finish-field-spread/locked`로 세 종목의 1080p 결승 분포와 순위 강조·시상을 확인했습니다. 자동 테스트 14개, 타입 검사, 빌드와 `git diff --check`가 통과했습니다. Railway 배포와 현장 TV 확인은 남아 있습니다.
+- `node .local/finish-approach-qa.mjs http://127.0.0.1:5220 output/playwright/finish-field-spread`와 `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/finish-field-spread/locked`로 세 종목의 1080p 결승 분포와 순위 강조·시상을 확인했습니다. 자동 테스트 14개, 타입 검사, 빌드와 `git diff --check`가 통과했습니다.
+- GitHub `main`의 `e35834a`를 Railway 운영 서비스에 올렸고 배포 `aedf8e39-d281-4b7c-ade5-99d14d33b809`가 성공했습니다. `node .local/railway-item-health.mjs`로 HTTPS 헬스체크와 운영 번들 해시를 확인했습니다. `node .local/finish-approach-qa.mjs https://skt-luckydraw.up.railway.app output/playwright/railway-finish-field`와 `node .local/photo-finish-qa.mjs https://skt-luckydraw.up.railway.app output/playwright/railway-finish-field/locked`에서 세 종목의 가상 90명 결승 구도, 상황 자막, 순위 확정, 결승 음악과 시상 순서를 확인했습니다. 현장 TV 검증은 남아 있습니다.
+
+## 기존 코스 연출과 추가 아이템·장애물
+
+- 새 30초 경주에 종목별 기존 코스 연출 3개를 복원했습니다. 수영은 상어 부캉이·대형 파도·오리 튜브, 사이클은 을지로 공사 구간·과속방지턱·내리막, 달리기는 응원공·쿠션 허들·스퍼트 레인입니다.
+- 기존 코스 연출의 앞·사이·뒤에 시드 기반 장애물과 부스터 7개를 배치했습니다. 주요 코스 연출과 추가 이벤트가 모두 실제 주행 속도에 영향을 주며, 상황 자막과 효과음은 두 종류 모두 재생됩니다. 수영에서는 부캉이가 선두 무리 앞쪽에 보이도록 위치를 조정했습니다. 기존 경기 기록은 저장된 재생 버전을 사용합니다.
+- 가상 90명 경기 300회를 시뮬레이션해 기존 연출과 추가 이벤트의 순서, 주행 거리의 단조 증가, 결승 1~3위와 추첨 순서의 일치를 확인했습니다. `npm.cmd test` 14개, `npm.cmd run typecheck`, `npm.cmd run build`, `git diff --check`가 통과했습니다. 기존 Three.js 번들 크기 경고가 남아 있습니다.
+- `node .local/finish-approach-qa.mjs http://127.0.0.1:5220 output/playwright/restored-course-events`로 세 종목의 기존 연출 3개와 추가 이벤트 7개를 확인했습니다. `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/restored-course-events/locked`로 결승 순위 강조·음악·시상을 확인했습니다. 초안 검증에서 같은 자막이 이어질 때 이전 이벤트를 읽는 문제가 있어 검증 코드가 이벤트 번호까지 기다리도록 수정했습니다. Railway 배포와 현장 TV 확인은 남아 있습니다.
 
 ## 다음 작업
 

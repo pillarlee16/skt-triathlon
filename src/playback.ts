@@ -34,14 +34,16 @@ export function photoFinishProgress(time:number) {
   return 1+.60*recovery+5*recovery**2+Math.max(0,after-.04)
 }
 export type Beat = {index:number; at:number; runner:Runner}
-export type RaceEvent = {
-  index:number; kind:'obstacle'|'item'; variant:number; at:number; appears:number; ends:number
-  gate:number; lane:number; runnerId:string; strength:number; title:string
+type PaceEffect = {at:number;ends:number;strength:number}
+type CourseEffect = PaceEffect & {index:number}
+export type RaceEvent = PaceEffect & {
+  index:number; kind:'obstacle'|'item'; variant:number; appears:number
+  gate:number; lane:number; runnerId:string; title:string
 }
 type Anchor = {time:number; distance:number}
 export type Runner = {
   person:Person; lane:number; rank:number; finish:number; anchors:Anchor[]
-  affected:boolean; events?:RaceEvent[]
+  affected:boolean; events?:RaceEvent[]; courseEffects?:CourseEffect[]
 }
 
 const eventTitles = {
@@ -192,7 +194,7 @@ function trailingFinish(rank:number,count:number,distance:number,front:number,pa
   ]
 }
 
-export function eventForce(event:RaceEvent,time:number) {
+export function eventForce(event:PaceEffect,time:number) {
   const phase=(time-event.at)/(event.ends-event.at)
   return phase>0&&phase<1?Math.sin(Math.PI*phase)**.75*event.strength:0
 }
@@ -200,9 +202,10 @@ export function eventForce(event:RaceEvent,time:number) {
 function itemRaceOrder(people:Person[],race:Race):Runner[] {
   if(!people.length)return []
   const seed=race.seed+sportSalt[race.sport]
+  const mixedRace=race.playbackVersion===4
   const winners=new Map(race.winners.map((winner,rank)=>[winner.id,rank]))
   const field=people.map((person,lane)=>({
-    person,lane,rank:0,finish:0,affected:false,events:[] as RaceEvent[],
+    person,lane,rank:0,finish:0,affected:false,events:[] as RaceEvent[],courseEffects:[] as CourseEffect[],
     anchors:[{time:0,distance:0}], distance:0, velocity:.94,leadSteps:0,
     pace:noise(seed,person.id), phase:noise(seed,person.id+'pace')*Math.PI*2,
   }))
@@ -217,11 +220,30 @@ function itemRaceOrder(people:Person[],race:Race):Runner[] {
   const kinds=rounds.map((_,index)=>(index%2===0)===itemFirst?'item' as const:'obstacle' as const)
   const swap=1+Math.floor(noise(seed,'item-order')*(rounds.length-3))
   ;[kinds[swap],kinds[swap+1]]=[kinds[swap+1],kinds[swap]]
-  for(let step=1,eventIndex=0;step<=handoffStep;step++){
+  const extraGates=[.116,.200,.342,.411,.561,.632,.770]
+    .map((gate,index)=>gate+(noise(seed,'extra-gate'+index)-.5)*.02)
+  const courseBeats=raceBeats[race.sport]
+  for(let step=1,eventIndex=0,courseIndex=0;step<=handoffStep;step++){
     const time=(step-1)/simulationSteps
     const leader=order[0].distance
     const spread=Math.min(1,time/.16)*Math.min(1,(.94-time)/.18)
-    if(eventIndex<rounds.length&&time>=rounds[eventIndex]){
+    const courseBeat=courseBeats[courseIndex]
+    if(mixedRace&&courseBeat&&leader>=courseBeat.gate){
+      const obstacle=courseBeat.sound==='obstacle'
+      const candidates=obstacle?order.slice(0,9):order.slice(Math.min(3,order.length-1),15)
+      const targets=candidates.map(runner=>({runner,roll:noise(seed+courseIndex*941,runner.person.id)}))
+        .sort((a,b)=>a.roll-b.roll).slice(0,obstacle?3:2).map(({runner})=>runner)
+      if(courseIndex===1&&!targets.includes(order[0]))targets.push(order[0])
+      const contact=race.sport==='running'&&courseIndex===0?courseBeat.gate+.025:courseBeat.gate
+      for(const runner of targets){
+        const at=time+Math.max(0,contact-runner.distance)/runner.velocity
+        if(at<handoff)runner.courseEffects.push({index:courseIndex,at,ends:Math.min(handoff,at+.054),
+          strength:obstacle?-(courseIndex===1?.26:.19):.30})
+      }
+      courseIndex++
+    }
+    const extraReady=mixedRace?(leader>=extraGates[eventIndex]||eventIndex===6&&time>=.795):time>=rounds[eventIndex]
+    if(eventIndex<rounds.length&&extraReady){
       const kind=kinds[eventIndex]
       const variant=Math.floor(noise(seed,'prop'+eventIndex)*2)
       const chase=eventIndex%3===1
@@ -253,6 +275,7 @@ function itemRaceOrder(people:Person[],race:Race):Runner[] {
       const preferredGap=(1-runner.pace)**1.65*.055*spread
       const draft=Math.min(.125,Math.max(0,gap-preferredGap-.008)*2.45)
       const action=runner.events.reduce((sum,event)=>sum+eventForce(event,time),0)
+        +runner.courseEffects.reduce((sum,event)=>sum+eventForce(event,time),0)
       const desired=.925+(runner.pace-.5)*.10+tempo+draft+action
       runner.velocity+=(desired-runner.velocity)*.43
       runner.distance+=runner.velocity/simulationSteps
@@ -284,11 +307,11 @@ function itemRaceOrder(people:Person[],race:Race):Runner[] {
         {time:.922,distance:.925-script[1].indexOf(rank)*.0023},
         {time:.952,distance:.960-script[2].indexOf(rank)*.0017},
         {time:.971,distance:.986-script[3].indexOf(rank)*.0018},
-      ]:race.playbackVersion===3?trailingFinish(rank,field.length,distance,firstCenter,runner.pace)
+      ]:(race.playbackVersion??0)>=3?trailingFinish(rank,field.length,distance,firstCenter,runner.pace)
         :[{time:.885,distance:Math.max(distance+.022,Math.min(firstCenter-.015,distance+.050))},
         {time:.952,distance:Math.max(distance+.047,.930-Math.min(54,rank-6)*.0015)}]
       appendFinish(anchors,velocity,[...closing,{time:finish,distance:1}])
-      return {person,lane,rank,finish,anchors,affected:false,events}
+      return {person,lane,rank,finish,anchors,affected:false,events,...(mixedRace?{courseEffects:runner.courseEffects}:{})}
     }
     const winner=winners.get(person.id)
     const finish=winner===undefined?1.023+(rank-winners.size)*.0024:.958+winner*.021
