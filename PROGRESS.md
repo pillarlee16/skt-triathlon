@@ -331,8 +331,34 @@
 - 새 경기는 마지막 약 6초에 2~6위권이 모여 달립니다. 시드에 따라 3위 방어, 막판 재역전, 선두와 3·4위가 함께 뒤집히는 결승을 재현합니다. 접전 선수의 진행 방향 간격은 좁히고 레인 간격은 확보해 한 화면에서 구분할 수 있게 합니다. 저장된 1~3위는 순서대로 결승선을 통과합니다. 기존 저장 경기에는 당시 재생 경로를 사용합니다.
 - 결승선 사선 카메라가 두 선수와 결승선을 한 화면에 잡습니다. 사용자 피드백을 반영해 3·4위 전용 순위표 강조, 선수 위 번호, 접전·확정 자막을 제거했습니다. 마지막 구간의 선수 움직임을 늦추고 BGM을 낮춥니다. 30초 경기가 끝난 뒤 약 0.72초 동안 결승 화면을 잡은 다음 Finish 카드와 결승 음악을 시작합니다. 경기 종료 8초 후 시상으로 전환합니다.
 - `npm.cmd test` 14개, `npm.cmd run typecheck`, `npm.cmd run build`, `git diff --check`를 통과했습니다. 자동 테스트는 세 종목 가상 90명 경기 300회에서 세 패턴, 전진, 3·4위 접전과 결승 순서를 확인합니다. 기존 Three.js 번들 크기 경고가 남아 있습니다.
-- `node .local/photo-finish-qa.mjs`로 로컬 프로덕션 빌드의 세 종목을 1080p Chrome에서 확인했습니다. 평소 순위표와 주행 순서가 일치했고 결승 전용 자막 없이 사선 카메라, 배경음 감쇠, Finish 카드·음악, 시상 순서가 이어졌습니다. 최종 화면은 `output/playwright/photo-finish-clean/`에 있습니다. Railway 배포와 현장 TV 검증은 남아 있습니다.
-- 새 결승 방식의 좌측 순위표에서 1~3위 선수의 결승 통과를 감지하면 해당 행을 금·은·동 배경과 체크 표시로 즉시 강조합니다. 확정 색은 Finish 카드가 나오기 전까지 남습니다. `node .local/photo-finish-qa.mjs`로 세 종목의 1080p 송출 화면에서 통과 전 표시 0개, 통과 때마다 1→2→3개, Finish 카드 직전 유지와 시상 순서 일치를 확인했습니다. 최신 화면은 `output/playwright/photo-finish-locked/`에 있습니다. 자동 테스트 14개, 타입 검사, 빌드 및 `git diff --check`가 통과했습니다. Railway 배포는 남아 있습니다.
+- `node .local/photo-finish-qa.mjs`로 로컬 프로덕션 빌드의 세 종목을 1080p Chrome에서 확인했습니다. 평소 순위표와 주행 순서가 일치했고 결승 전용 자막 없이 사선 카메라, 배경음 감쇠, Finish 카드·음악, 시상 순서가 이어졌습니다. 화면은 `output/playwright/photo-finish-clean/`에 있습니다.
+- 새 결승 방식의 좌측 순위표에서 1~3위 선수의 결승 통과를 감지하면 해당 행을 금·은·동 배경과 체크 표시로 즉시 강조합니다. 확정 색은 Finish 카드가 나오기 전까지 남습니다. `node .local/photo-finish-qa.mjs`로 세 종목의 1080p 송출 화면에서 통과 전 표시 0개, 통과 때마다 1→2→3개, Finish 카드 직전 유지와 시상 순서 일치를 확인했습니다. 화면은 `output/playwright/photo-finish-locked/`에 있습니다. 자동 테스트 14개, 타입 검사, 빌드 및 `git diff --check`가 통과했습니다.
+- 2026-11-24에 GitHub `main`의 `005e782`를 기존 Railway 운영 서비스에 올렸습니다. 배포 `edf236c1-ffd2-4b2c-8aec-c21468f2928c`가 `SUCCESS`로 전환됐습니다. `node .local/railway-item-health.mjs`에서 HTTPS 헬스체크와 운영 번들 해시 일치를 확인했습니다.
+- `node .local/photo-finish-qa.mjs https://skt-luckydraw.up.railway.app output/playwright/railway-photo-finish`로 운영 송출 화면에서 세 종목을 가상 90명 데이터로 확인했습니다. 결승 통과에 맞춰 1→2→3위가 강조되고, 결승 음악과 시상 순서가 이어졌습니다. 검증 상태는 브라우저에만 주입했습니다. 현장 TV 검증은 남아 있습니다.
+
+## 결승 광각 카메라와 상황 자막
+
+- 30초 기본 경기는 21초부터 정면 추적 카메라가 높아지며 화각을 43도에서 52도로 넓힙니다. 23초 무렵 선두권과 남은 코스, 결승선을 한 화면에 담고 26초 무렵에는 결승선 쪽 구도를 고정합니다. 사이클은 상가 지붕의 가림을 줄이기 위해 도로 위에서 더 높은 구도를 잡습니다.
+- 하단 아이템·장애물 자막에서 자동으로 붙던 선수 이름을 제거해 상황 문구만 표시합니다. 종목별 사용자 설정 자막도 해당 상황에서 사용합니다.
+- `node .local/finish-approach-qa.mjs`로 로컬 프로덕션 빌드의 세 종목을 1080p에서 확인했습니다. 20.9·22·23·26·29초를 촬영해 코스와 선두권을 비교했고, 세 종목 모두 이름 없는 부스터·장애물 자막을 검증했습니다. `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/finish-approach/locked`에서 결승 통과 1→2→3위 강조, 결승 음향과 시상 순서를 재확인했습니다. 자동 테스트 14개, 타입 검사, 빌드, `git diff --check`가 통과했습니다. 촬영본은 `output/playwright/finish-approach/`에 있습니다. Railway 배포와 현장 TV 확인은 남아 있습니다.
+- 23초 사선 구도에서 26초까지 카메라 화각을 52도에서 47.5도로 좁히고, 고정 구도의 중심을 결승선 앞쪽으로 옮겼습니다. 선두권과 결승선이 더 크게 보이고 결승선 이후 여백이 줄었습니다. `node .local/finish-approach-qa.mjs http://127.0.0.1:5220 output/playwright/finish-tight`와 `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/finish-tight/locked`로 세 종목 1080p 구도와 결승 통과·순위 강조·시상을 확인했습니다. 자동 테스트 14개, 타입 검사, 빌드, `git diff --check`가 통과했습니다. Railway 배포와 현장 TV 확인은 남아 있습니다.
+
+## 사이클 측면 결승과 FINISH 표지판
+
+- FINISH 간판을 결승 아치 상단 가로 빔의 중앙 앞·뒷면에 고정했습니다. 사이클 카메라는 도로 끝의 넓은 시점에서 낮은 사선으로 내려오고 시선을 결승선 쪽으로 옮겨 고정된 간판을 화면 중앙 쪽에 담습니다. 수영과 달리기 카메라는 결승선 접근 쪽에서 비스듬히 바라봐 빔에 붙은 글자와 결승선이 함께 보이도록 했습니다.
+- `node .local/finish-approach-qa.mjs http://127.0.0.1:5220 output/playwright/fixed-finish-final`과 `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/fixed-finish-final/locked`로 세 종목의 1080p 결승 접근, 순위 확정, 결승 음악과 시상 순서를 확인했습니다. 세 종목의 고정 간판과 결승선을 촬영해 검토했습니다. 자동 테스트 14개, 타입 검사, 빌드 및 `git diff --check`가 통과했습니다. Railway 배포와 현장 TV 확인은 남아 있습니다.
+- 사용자 피드백에 따라 사이클 카메라를 간판 보정 전의 낮은 사선 구도와 접근 경로로 복원했습니다. 빔 앞·뒷면에 고정한 간판은 복원된 카메라에서도 읽을 수 있습니다. `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/cycling-finish-restored`로 세 종목의 1080p 결승과 시상을 확인했습니다. 자동 테스트 14개, 타입 검사, 빌드와 `git diff --check`가 통과했습니다. Railway 배포는 남아 있습니다.
+
+## 수영·달리기 마지막 얼굴 구도
+
+- 수영과 달리기는 기존 광각 접근을 유지하고, 30초 기준 27초부터 28.5초 사이에 카메라가 결승선 앞쪽의 낮은 사선으로 이동합니다. 선수 얼굴, 고정된 FINISH 간판, 결승선이 한 화면에 들어옵니다. 사이클은 선택한 결승 카메라를 사용합니다.
+- `node .local/finish-approach-qa.mjs http://127.0.0.1:5220 output/playwright/finish-face-view`와 `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/finish-face-view/locked`로 세 종목의 1080p 접근·결승 구도, 순위 확정, 결승 음향과 시상을 확인했습니다. 수영과 달리기에서 얼굴과 간판이 함께 보이는 장면을 촬영했습니다. 자동 테스트 14개, 타입 검사, 빌드 및 `git diff --check`가 통과했습니다. Railway 배포와 현장 TV 확인은 남아 있습니다.
+
+## 결승 후미 간격
+
+- 새 경주는 결승 접근 때부터 추격권과 후미의 진행 속도에 차이를 주고 선수별 변화폭을 시드로 정합니다. 후미 30명이 같은 지점으로 수렴하던 문제가 해소됐습니다. 기존 저장 경기의 재생 경로와 새 경기의 결승 선두 6명 경로를 보존했습니다.
+- 세 종목 가상 90명 경기 300회를 비교했습니다. 결승 직전 구간에서 후미 30명의 진행 방향 분포가 평균 약 8.2m로 넓어졌고, 1m 구간의 최대 인원은 평균 30명에서 약 5명으로 줄었습니다. 결승 1~3위는 모두 추첨 순서와 일치했습니다.
+- `node .local/finish-approach-qa.mjs http://127.0.0.1:5220 output/playwright/finish-field-spread`와 `node .local/photo-finish-qa.mjs http://127.0.0.1:5220 output/playwright/finish-field-spread/locked`로 세 종목의 1080p 결승 분포와 순위 강조·시상을 확인했습니다. 자동 테스트 14개, 타입 검사, 빌드와 `git diff --check`가 통과했습니다. Railway 배포와 현장 TV 확인은 남아 있습니다.
 
 ## 다음 작업
 

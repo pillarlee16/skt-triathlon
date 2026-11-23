@@ -183,7 +183,7 @@ test('item races replay seven lane events, change pace and still finish in draw 
       if(!ready.ready)ready=apply(ready,{type:'prepare',sport},base)
       const state=apply(ready,{type:'start'},base,max=>max===2**31?seed:0)
       const race=currentRace(state)!
-      assert.equal(race.playbackVersion,2)
+      assert.equal(race.playbackVersion,3)
       const runners=trackOrder(state.people,race)
       assert.deepEqual(trackOrder(state.people,structuredClone(race)),runners)
       const events=raceEvents(runners)
@@ -229,15 +229,23 @@ test('photo finishes vary the cutoff battle and reveal all three winners before 
     const winners=[people[index%90],people[(index+29)%90],people[(index+57)%90]]
       .map(({id,name})=>({id,name,image:'',prize:''}))
     const race={id:'finish',startsAt:0,endsAt:30000,seed,sport,winners}
-    const runners=trackOrder(people,{...race,playbackVersion:2})
+    const previous=trackOrder(people,{...race,playbackVersion:2})
+    const runners=trackOrder(people,{...race,playbackVersion:3})
     const original=trackOrder(people,{...race,playbackVersion:1})
     assert.deepEqual(raceEvents(runners),raceEvents(original))
+    assert.deepEqual(runners.slice(0,6),previous.slice(0,6))
     const ranks=(t:number)=>runners.slice().sort((a,b)=>position(b,t)-position(a,t)||a.rank-b.rank)
     scenarios.add([.885,.922,.952,.971].map(t=>ranks(t).slice(0,4).map(r=>r.rank).join('')).join(','))
     assert.ok(runners.every(r=>r.anchors.every((anchor,i,a)=>i===0||anchor.distance>a[i-1].distance)))
     for(const t of [.922,.952,.971]){
       const front=ranks(t)
       assert.ok(position(front[2],t)-position(front[3],t)<.006)
+    }
+    for(const time of [.952,1]){
+      const tail=ranks(time).slice(60).map(runner=>position(runner,time))
+      assert.ok(tail[0]-tail[tail.length-1]>.035)
+      const largestCluster=Math.max(...tail.map((point,i)=>tail.slice(i).filter(other=>point-other<=1/160).length))
+      assert.ok(largestCluster<12)
     }
     assert.deepEqual(ranks(1).filter(r=>position(r,1)>=1).map(r=>r.person.id),winners.map(w=>w.id))
     const beforeCard=photoFinishProgress(1+finishHoldMs/30000)

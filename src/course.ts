@@ -707,13 +707,17 @@ export function buildCourse(group:T.Group,sport:Sport,podium:boolean,keyDirectio
             box(bands[0],anchor,y+.41,z+dz,.55,.37,.52)
           }
         }
-        box(0xe4d5bf,x,y+arch+.08,z-.339,6.36,.98,.075)
         const sign=paintedPanel(6.1,.81,ctx=>{
           ctx.fillStyle='#302641';ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height)
           panelLettering(ctx,'FINISH','#fff0d1',102,ctx.canvas.height/2)
         })
-        sign.position.set(x,y+arch+.08,z-.382)
-        sign.rotation.y=Math.PI;group.add(sign)
+        for(const side of [-1,1]){
+          box(0xe4d5bf,x,y+arch+.08,z+side*.339,6.36,.98,.075)
+          const face=side===1?sign:sign.clone()
+          face.position.set(x,y+arch+.08,z+side*.382)
+          face.rotation.y=side===1?0:Math.PI
+          group.add(face)
+        }
       }
     }
     raceBeats[sport].forEach(({gate},i)=>{

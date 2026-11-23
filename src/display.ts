@@ -244,7 +244,7 @@ export function display(app:HTMLElement) {
       const race=currentRace(s)
       const p=stage(s,now)
       const sport=race?.sport??s.ready?.sport??'swimming'
-      const photo=race?.playbackVersion===2&&race.winners.length===3&&race.podiumAt===undefined
+      const photo=race&&(race.playbackVersion??0)>=2&&race.winners.length===3&&race.podiumAt===undefined
       const finishHold=photo&&p==='transition'&&now-race!.endsAt<finishHoldMs
       const podiumAt=race?podiumStartAt(race):undefined
       const untilPodium=podiumAt===undefined?Infinity:podiumAt-now
@@ -288,7 +288,7 @@ export function display(app:HTMLElement) {
       const incident=p==='racing'?events.findLast(candidate=>progress>=candidate.appears&&progress<candidate.ends):undefined
       const effect=p==='racing'?events.findLast(candidate=>progress>=candidate.at&&progress<candidate.ends):undefined
       const event=beat&&p==='racing'?raceBeats[sport][beat.index]:undefined
-      const shot=photoShot&&!incident?'photo':progress>=finishShotAt?'finish':incident||beat?'event':progress>=.10?'leader':'wide'
+      const shot=photoShot?'photo':progress>=finishShotAt?'finish':incident||beat?'event':progress>=.10?'leader':'wide'
       const ranked=runners.map(r=>({r,p:position(r,progress)})).sort((a,b)=>b.p-a.p||a.r.rank-b.r.rank)
       const motionTime=time/1000+(progress-elapsed)*(race?race.endsAt-race.startsAt:0)/1000
       const revealed=p==='podium'&&race?podiumRevealed(race,now):0
@@ -376,9 +376,8 @@ export function display(app:HTMLElement) {
         }
         const savedCaption=s.config.captions[sport]
         const customCaption=savedCaption&&savedCaption!==raceBeats[sport][1].title&&savedCaption!=='급커브! 선두권 대혼전'
-        const featured=effect?runners.find(runner=>runner.person.id===effect.runnerId):undefined
-        const caption=featured&&effect
-          ?featured.person.name+' · '+(effect.kind==='obstacle'&&customCaption?savedCaption:effect.title)
+        const caption=effect
+          ?effect.kind==='obstacle'&&customCaption?savedCaption:effect.title
           :beat?.index===1&&customCaption?savedCaption:event?.title
         setMarkup('<div class="leaderboard"><ul role="list" aria-label="경기 순위">'+ranking.map((runner,index)=>{
             const {person}=runner

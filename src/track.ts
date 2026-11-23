@@ -1,7 +1,7 @@
 import * as T from 'three'
 import {armShape,bodyShape,contactTexture,faceBindingShape,faceSurface,faceTexture,helmetShape,helmetTexture,nameBibs,outfitTexture,shoeShape,swimGoggleShape,uniformPipingShape} from './avatar.ts'
 import type {Sport,Person} from './model.ts'
-import {eventForce,finishShotAt,position,raceBeats,raceEvents,type Beat,type RaceEvent,type Runner} from './playback.ts'
+import {eventForce,finishShotAt,photoFinishAt,position,raceBeats,raceEvents,type Beat,type RaceEvent,type Runner} from './playback.ts'
 import {buildCourse,courseColors,coursePoint,world} from './course.ts'
 import {paintedPanel,panelLettering,podiumEnvironment,poolItems,rollingWave,speedBump,speedBumpHeight,skyGradient,swimmingWake} from './scenery.ts'
 import {RoundedBoxGeometry} from 'three/addons/geometries/RoundedBoxGeometry.js'
@@ -16,6 +16,9 @@ const launchDepth=42
 const launchMerge=.09
 const launchEnd=.21
 const launchSpacing=1.28
+const chaseFov=43,approachFov=52,finishFov=47.5
+const finishRevealAt=23/30,finishSetAt=26/30
+const faceRevealAt=27/30,faceSetAt=28.5/30
 const launchZ=(distance:number)=>-world*distance+launchDepth*Math.max(0,1-distance/launchEnd)
 const lighting={
   swimming:{sky:0xebf7ff,ground:0x87b8ca,fill:1.18,sun:0xfff2df,key:3.4,keyX:-11,rim:0xc3edff,edge:.83,exposure:1.10},
@@ -31,7 +34,7 @@ export function createTrack(host:HTMLElement) {
   host.append(renderer.domElement)
   const scene=new T.Scene()
   const skies=new Map<keyof typeof courseColors,T.Texture>()
-  const camera=new T.PerspectiveCamera(43,1,.1,250)
+  const camera=new T.PerspectiveCamera(chaseFov,1,.1,250)
   const course=new T.Group(), players=new T.Group()
   const ambient=new T.HemisphereLight()
   const sun=new T.DirectionalLight()
@@ -686,12 +689,14 @@ export function createTrack(host:HTMLElement) {
     const focus=leaders[0]
     const leaderPosition=focus?Math.min(.99,position(focus,t)):0
     const subject=event&&eventPoses.get(event.runnerId)
-    const eventBlend=event&&shot==='event'?T.MathUtils.smoothstep(t,event.appears,event.at)
+    const eventBlend=event&&(shot==='event'||shot==='photo')?T.MathUtils.smoothstep(t,event.appears,event.at)
       *(1-T.MathUtils.smoothstep(t,event.at,event.ends)):0
     const subjectPosition=subject?.distance??leaderPosition
     const p=T.MathUtils.lerp(leaderPosition,Math.max(leaderPosition-.07,subjectPosition),eventBlend*.72)
     const {x,y,z}=coursePoint(sport,p)
     const chaseGap=T.MathUtils.clamp((p-(chasePosition??p))*world,0,12)
+    const reveal=shot==='photo'?T.MathUtils.smoothstep(t,photoFinishAt,finishRevealAt):0
+    const settle=shot==='photo'?T.MathUtils.smoothstep(t,finishRevealAt,finishSetAt):0
     if(podium){goal.set(0,3.25,-world+14.6);target.set(0,1.13,-world+4)}
     else{
       const opening=1-T.MathUtils.smoothstep(t,0,.14)
@@ -711,17 +716,23 @@ export function createTrack(host:HTMLElement) {
       goal.z=T.MathUtils.lerp(goal.z,launchZ(p)-launchWidth*.66,launch)
       target.z+=launchZ(p)-z
       target.x*=1-launch
-      if(shot==='photo'&&leaders.length>=4){
-        const third=leaders[2],fourth=leaders[3]
-        const midpoint=(position(third,t)+position(fourth,t))/2
-        const lane=(laneX(third)+laneX(fourth))/2
+      if(reveal>0&&focus){
+        const front=leaders.reduce((sum,runner)=>sum+position(runner,t),0)/leaders.length
+        const approach=coursePoint(sport,T.MathUtils.lerp(front,1,.34))
         const finish=coursePoint(sport,1)
-        const farLane=Math.abs(laneX(third)-laneX(fourth))
-        const rail=T.MathUtils.smoothstep(t,.888,.953)
-        const center=T.MathUtils.lerp(midpoint,1,T.MathUtils.smoothstep(t,.95,.978)*.64)
-        const finishView=coursePoint(sport,center)
-        goal.lerp(photoGoal.set(finish.x+14+farLane*.22,finish.y+6+farLane*.12,finish.z-13-farLane*.28),rail)
-        target.lerp(photoTarget.set(finishView.x+lane*.40-1,finishView.y+1.05,finishView.z),rail)
+        // Start over the cycling road, then descend to its low, diagonal finish view.
+        photoGoal.set(approach.x+(bike?11:40),approach.y+(bike?32:18),
+          bike?approach.z-6:Math.max(approach.z-6,finish.z+13))
+          .lerp(photoTarget.set(finish.x+(bike?15.5:29),finish.y+(bike?7.5:13),finish.z+(bike?-10:14.5)),settle)
+        goal.lerp(photoGoal,reveal)
+        photoTarget.set(approach.x,approach.y+.65,approach.z)
+          .lerp(photoGoal.set(finish.x-1,finish.y+.65,finish.z+(bike?11.5:12)),settle)
+        target.lerp(photoTarget,reveal)
+        if(!bike){
+          const faceView=T.MathUtils.smoothstep(t,faceRevealAt,faceSetAt)
+          goal.lerp(photoGoal.set(finish.x+16,finish.y+(swim?7.2:7.8),finish.z-10.5),faceView)
+          target.lerp(photoTarget.set(finish.x-1,finish.y+.75,finish.z+10.5),faceView)
+        }
       }
       if(scene.fog instanceof T.Fog){
         scene.fog.near=62+launch*launchWidth*.62
@@ -729,6 +740,11 @@ export function createTrack(host:HTMLElement) {
       }
     }
     const ease=cameraReady?1-Math.exp(-dt*4.2):1
+    const targetFov=T.MathUtils.lerp(T.MathUtils.lerp(chaseFov,approachFov,reveal),finishFov,settle)
+    const fov=T.MathUtils.lerp(camera.fov,targetFov,ease)
+    if(Math.abs(camera.fov-fov)>.01){
+      camera.fov=fov;camera.updateProjectionMatrix()
+    }
     cameraReady=true
     look.lerp(target,ease);camera.position.lerp(goal,ease);camera.lookAt(look)
     renderer.render(scene,camera)

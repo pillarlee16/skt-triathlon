@@ -19,7 +19,7 @@ export const raceBeats = {
 } as const
 
 export const finishShotAt=.84
-export const photoFinishAt=.80
+export const photoFinishAt=21/30
 export const finishHoldMs=720
 
 // Reach the line on the original race clock while easing down over the last stretch.
@@ -178,6 +178,20 @@ function appendFinish(anchors:Anchor[],velocity:number,closing:Anchor[]) {
     {time:handoff+blend,distance:start.distance+(velocity+speed)*blend/2},...closing)
 }
 
+function trailingFinish(rank:number,count:number,distance:number,front:number,pace:number):Anchor[] {
+  const depth=(rank-6)/Math.max(1,count-7)
+  const fatigue=(Math.max(0,depth-.56)/.44)**1.35
+  const variation=(pace-.5)*(.004+.012*depth)
+  const spread=.058*depth+.045*fatigue
+  const entry=Math.max(distance+.021,Math.min(front-.014,.873-.040*depth-.014*fatigue+variation*.45))
+  const straight=Math.max(entry+.023,.936-spread*.76+variation)
+  return [
+    {time:.885,distance:entry},
+    {time:.952,distance:straight},
+    {time:1,distance:Math.max(straight+.020,.972-spread+variation*1.2)},
+  ]
+}
+
 export function eventForce(event:RaceEvent,time:number) {
   const phase=(time-event.at)/(event.ends-event.at)
   return phase>0&&phase<1?Math.sin(Math.PI*phase)**.75*event.strength:0
@@ -247,7 +261,7 @@ function itemRaceOrder(people:Person[],race:Race):Runner[] {
     order.sort((a,b)=>b.distance-a.distance||b.pace-a.pace||a.lane-b.lane)
     order[0].leadSteps++
   }
-  const photo=race.playbackVersion===2&&winners.size===3
+  const photo=(race.playbackVersion??0)>=2&&winners.size===3
   const finalists=order.filter(runner=>winners.has(runner.person.id))
     .sort((a,b)=>winners.get(a.person.id)!-winners.get(b.person.id)!)
   const followers=order.filter(runner=>!winners.has(runner.person.id))
@@ -270,7 +284,8 @@ function itemRaceOrder(people:Person[],race:Race):Runner[] {
         {time:.922,distance:.925-script[1].indexOf(rank)*.0023},
         {time:.952,distance:.960-script[2].indexOf(rank)*.0017},
         {time:.971,distance:.986-script[3].indexOf(rank)*.0018},
-      ]:[{time:.885,distance:Math.max(distance+.022,Math.min(firstCenter-.015,distance+.050))},
+      ]:race.playbackVersion===3?trailingFinish(rank,field.length,distance,firstCenter,runner.pace)
+        :[{time:.885,distance:Math.max(distance+.022,Math.min(firstCenter-.015,distance+.050))},
         {time:.952,distance:Math.max(distance+.047,.930-Math.min(54,rank-6)*.0015)}]
       appendFinish(anchors,velocity,[...closing,{time:finish,distance:1}])
       return {person,lane,rank,finish,anchors,affected:false,events}

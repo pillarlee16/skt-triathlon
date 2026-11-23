@@ -51,7 +51,7 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       if (emergency) attempt.podiumAt=now+podiumLeadMs
       else {
         attempt.transitionMs=podiumTransitionMs
-        attempt.playbackVersion=2
+        attempt.playbackVersion=3
       }
       s.races.push(attempt)
       s.current=attempt.id
