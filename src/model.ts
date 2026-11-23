@@ -22,7 +22,7 @@ export type Winner = {id:string; name:string; prize:string; image:string}
 export type Race = {
   id:string; sport:Sport; seed:number; startsAt:number; endsAt:number
   winners:Winner[]; podiumAt?:number; completedAt?:number; finishers?:number; transitionMs?:number
-  playbackVersion?:1
+  playbackVersion?:1|2
   invalidated?:{at:number; reason:string; redrawId?:string}
   redrawId?:string
   createdAt?:number

@@ -83,7 +83,7 @@ export function createTrack(host:HTMLElement) {
   let cameraReady=false, cameraPodium=false
   let launchWidth=0
   let generation=0
-  const goal=new T.Vector3(), look=new T.Vector3()
+  const goal=new T.Vector3(), look=new T.Vector3(), photoGoal=new T.Vector3(), photoTarget=new T.Vector3()
   function dispose(group:T.Group) {
     const geometry=new Set<T.BufferGeometry>()
     const materials=new Set<T.Material>()
@@ -440,15 +440,15 @@ export function createTrack(host:HTMLElement) {
   }
   let w=0,h=0
   const laneX=(runner:Runner)=> (runner.lane%15-7)*1.4
-  function frame(t:number,time:number,shot:string,leaders:Runner[],starter=false,revealed=0,beat?:Beat,podiumAge=Infinity,chasePosition?:number,event?:RaceEvent) {
+  function frame(t:number,clock:number,shot:string,leaders:Runner[],starter=false,revealed=0,beat?:Beat,podiumAge=Infinity,chasePosition?:number,event?:RaceEvent,time=clock) {
     if(w!==host.clientWidth||h!==host.clientHeight){
       w=host.clientWidth;h=host.clientHeight
       if(w&&h){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
     }
     const podium=shot==='podium'
     const swim=!podium&&sport==='swimming',bike=!podium&&sport==='cycling'
-    const dt=previousFrame?Math.min(.06,Math.max(.001,time-previousFrame)):.016
-    previousFrame=time
+    const dt=previousFrame?Math.min(.06,Math.max(.001,clock-previousFrame)):.016
+    previousFrame=clock
     frameAverage=frameAverage*.96+dt*1000*.04
     if(frameAverage>33&&dpr>.85&&w&&h){
       dpr=Math.max(.85,dpr-.15);renderer.setPixelRatio(dpr);renderer.setSize(w,h,false);frameAverage=25
@@ -711,6 +711,18 @@ export function createTrack(host:HTMLElement) {
       goal.z=T.MathUtils.lerp(goal.z,launchZ(p)-launchWidth*.66,launch)
       target.z+=launchZ(p)-z
       target.x*=1-launch
+      if(shot==='photo'&&leaders.length>=4){
+        const third=leaders[2],fourth=leaders[3]
+        const midpoint=(position(third,t)+position(fourth,t))/2
+        const lane=(laneX(third)+laneX(fourth))/2
+        const finish=coursePoint(sport,1)
+        const farLane=Math.abs(laneX(third)-laneX(fourth))
+        const rail=T.MathUtils.smoothstep(t,.888,.953)
+        const center=T.MathUtils.lerp(midpoint,1,T.MathUtils.smoothstep(t,.95,.978)*.64)
+        const finishView=coursePoint(sport,center)
+        goal.lerp(photoGoal.set(finish.x+14+farLane*.22,finish.y+6+farLane*.12,finish.z-13-farLane*.28),rail)
+        target.lerp(photoTarget.set(finishView.x+lane*.40-1,finishView.y+1.05,finishView.z),rail)
+      }
       if(scene.fog instanceof T.Fog){
         scene.fog.near=62+launch*launchWidth*.62
         scene.fog.far=168+launch*launchWidth

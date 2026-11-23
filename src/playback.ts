@@ -19,6 +19,20 @@ export const raceBeats = {
 } as const
 
 export const finishShotAt=.84
+export const photoFinishAt=.80
+export const finishHoldMs=720
+
+// Reach the line on the original race clock while easing down over the last stretch.
+export function photoFinishProgress(time:number) {
+  const start=.94
+  if(time<=start)return time
+  const span=1-start
+  const phase=(time-start)/span
+  if(time<=1)return time+span*.40*phase**2*(1-phase)
+  const after=time-1
+  const recovery=Math.min(after,.04)
+  return 1+.60*recovery+5*recovery**2+Math.max(0,after-.04)
+}
 export type Beat = {index:number; at:number; runner:Runner}
 export type RaceEvent = {
   index:number; kind:'obstacle'|'item'; variant:number; at:number; appears:number; ends:number
@@ -55,7 +69,7 @@ const packOffsets:Record<Sport,number[][]>={
 const sportSalt:Record<Sport,number>={swimming:0,cycling:1511,running:3037}
 
 export function trackOrder(people:Person[],race:Race):Runner[] {
-  if(race.playbackVersion===1)return itemRaceOrder(people,race)
+  if(race.playbackVersion)return itemRaceOrder(people,race)
   const winners=new Map(race.winners.map((winner,rank)=>[winner.id,rank]))
   const seed=race.seed+sportSalt[race.sport]
   const seeded=people.map((person,lane)=>({person,lane, winner:winners.get(person.id),
@@ -146,6 +160,23 @@ export function trackOrder(people:Person[],race:Race):Runner[] {
 }
 const simulationSteps=300
 const handoffStep=249
+const handoff=handoffStep/simulationSteps
+
+const finishes=[.980,.985,.991,1.004,1.016,1.023]
+const photoOrders=[
+  [[0,1,2,3,4,5],[0,1,2,3,5,4],[0,1,2,3,4,5],[0,1,2,3,4,5]],
+  [[0,1,3,2,4,5],[0,1,2,3,4,5],[0,1,3,2,4,5],[0,1,3,2,5,4]],
+  [[0,1,2,3,4,5],[1,0,3,4,2,5],[1,0,2,3,4,5],[1,0,3,2,4,5]],
+]
+
+function appendFinish(anchors:Anchor[],velocity:number,closing:Anchor[]) {
+  const start=anchors[anchors.length-1]
+  const first=closing[0]
+  const blend=.025
+  const speed=(first.distance-start.distance-velocity*blend/2)/(first.time-start.time-blend/2)
+  anchors.push({time:handoff+blend/2,distance:start.distance+(velocity*3+speed)*blend/8},
+    {time:handoff+blend,distance:start.distance+(velocity+speed)*blend/2},...closing)
+}
 
 export function eventForce(event:RaceEvent,time:number) {
   const phase=(time-event.at)/(event.ends-event.at)
@@ -216,15 +247,37 @@ function itemRaceOrder(people:Person[],race:Race):Runner[] {
     order.sort((a,b)=>b.distance-a.distance||b.pace-a.pace||a.lane-b.lane)
     order[0].leadSteps++
   }
-  const finishOrder=[...order.filter(runner=>winners.has(runner.person.id))
-    .sort((a,b)=>winners.get(a.person.id)!-winners.get(b.person.id)!),
-    ...order.filter(runner=>!winners.has(runner.person.id))]
+  const photo=race.playbackVersion===2&&winners.size===3
+  const finalists=order.filter(runner=>winners.has(runner.person.id))
+    .sort((a,b)=>winners.get(a.person.id)!-winners.get(b.person.id)!)
+  const followers=order.filter(runner=>!winners.has(runner.person.id))
+  if(photo){
+    for(let place=0;place<2;place++){
+      const challenger=followers.findIndex((runner,index)=>index>=place&&index<8
+        &&Math.abs(runner.lane%15-finalists[2].lane%15)>=2)
+      if(challenger>place)followers.splice(place,0,...followers.splice(challenger,1))
+    }
+  }
+  const finishOrder=[...finalists,...followers]
+  const script=photoOrders[Math.floor(noise(seed,'photo-finish')*photoOrders.length)]
+  const firstCenter=Math.max(.883,...finishOrder.slice(0,6).map(runner=>runner.distance+.013))
   return finishOrder.map((runner,rank)=>{
-    const winner=winners.get(runner.person.id)
-    const finish=winner===undefined?1.023+(rank-winners.size)*.0024:.958+winner*.021
     const {person,lane,anchors,events,distance,velocity}=runner
+    if(photo){
+      const finish=finishes[rank]??(1.028+(rank-6)*.0029)
+      const closing=rank<6?[
+        {time:.885,distance:firstCenter-script[0].indexOf(rank)*.002},
+        {time:.922,distance:.925-script[1].indexOf(rank)*.0023},
+        {time:.952,distance:.960-script[2].indexOf(rank)*.0017},
+        {time:.971,distance:.986-script[3].indexOf(rank)*.0018},
+      ]:[{time:.885,distance:Math.max(distance+.022,Math.min(firstCenter-.015,distance+.050))},
+        {time:.952,distance:Math.max(distance+.047,.930-Math.min(54,rank-6)*.0015)}]
+      appendFinish(anchors,velocity,[...closing,{time:finish,distance:1}])
+      return {person,lane,rank,finish,anchors,affected:false,events}
+    }
+    const winner=winners.get(person.id)
+    const finish=winner===undefined?1.023+(rank-winners.size)*.0024:.958+winner*.021
     // Ease from the last simulated speed into a continuous run to the assigned finish.
-    const handoff=handoffStep/simulationSteps
     const blend=.027
     const closingSpeed=(1-distance-velocity*blend/2)/(finish-handoff-blend/2)
     const next=distance+(velocity+closingSpeed)*blend/2

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {apply} from '../src/engine.ts'
 import {initial,sports,csv,currentRace,stage,findAsset,podiumStartAt,podiumReadyAt,podiumRevealed,podiumIntervalMs,type State,type Sport} from '../src/model.ts'
-import {cuePoints,position,raceBeats,raceEvents,trackOrder,type Runner} from '../src/playback.ts'
+import {cuePoints,finishHoldMs,photoFinishProgress,position,raceBeats,raceEvents,trackOrder,type Runner} from '../src/playback.ts'
 import {fixture} from './fixture.ts'
 const base=100000
 function finish(s:State,sport:Sport,now:number) {
@@ -80,7 +80,7 @@ test('exactly the expected runners cross before the end',()=>{
   const started=apply(setup,{type:'start'},base)
   const race=currentRace(started)!
   const sorted=trackOrder(started.people,race)
-  assert.equal(sorted.filter(r=>position(r,.9999)>=1).length,2)
+  assert.equal(sorted.filter(r=>position(r,.988)>=1).length,2)
   assert.equal(sorted.filter(r=>position(r,1)>=1).length,3)
   assert.deepEqual(sorted.filter(r=>position(r,1)>=1).map(r=>r.person.id),race.winners.map(w=>w.id))
   assert.ok(sorted.every(r=>position(r,0)===0))
@@ -183,7 +183,7 @@ test('item races replay seven lane events, change pace and still finish in draw 
       if(!ready.ready)ready=apply(ready,{type:'prepare',sport},base)
       const state=apply(ready,{type:'start'},base,max=>max===2**31?seed:0)
       const race=currentRace(state)!
-      assert.equal(race.playbackVersion,1)
+      assert.equal(race.playbackVersion,2)
       const runners=trackOrder(state.people,race)
       assert.deepEqual(trackOrder(state.people,structuredClone(race)),runners)
       const events=raceEvents(runners)
@@ -216,4 +216,34 @@ test('item races replay seven lane events, change pace and still finish in draw 
     assert.ok(firstEventTimes.size>1)
     assert.ok(applied/total>.85)
   }
+})
+
+test('photo finishes vary the cutoff battle and reveal all three winners before the card',()=>{
+  const people=fixture().people
+  assert.equal(photoFinishProgress(.94),.94)
+  assert.equal(photoFinishProgress(1),1)
+  assert.ok(photoFinishProgress(1)-photoFinishProgress(.995)<.004)
+  const scenarios=new Set<string>()
+  for(const sport of sports)for(let index=0;index<100;index++){
+    const seed=(Math.imul(index+1,2654435761)>>>0)%2**31
+    const winners=[people[index%90],people[(index+29)%90],people[(index+57)%90]]
+      .map(({id,name})=>({id,name,image:'',prize:''}))
+    const race={id:'finish',startsAt:0,endsAt:30000,seed,sport,winners}
+    const runners=trackOrder(people,{...race,playbackVersion:2})
+    const original=trackOrder(people,{...race,playbackVersion:1})
+    assert.deepEqual(raceEvents(runners),raceEvents(original))
+    const ranks=(t:number)=>runners.slice().sort((a,b)=>position(b,t)-position(a,t)||a.rank-b.rank)
+    scenarios.add([.885,.922,.952,.971].map(t=>ranks(t).slice(0,4).map(r=>r.rank).join('')).join(','))
+    assert.ok(runners.every(r=>r.anchors.every((anchor,i,a)=>i===0||anchor.distance>a[i-1].distance)))
+    for(const t of [.922,.952,.971]){
+      const front=ranks(t)
+      assert.ok(position(front[2],t)-position(front[3],t)<.006)
+    }
+    assert.deepEqual(ranks(1).filter(r=>position(r,1)>=1).map(r=>r.person.id),winners.map(w=>w.id))
+    const beforeCard=photoFinishProgress(1+finishHoldMs/30000)
+    const visibleFinishers=ranks(beforeCard).filter(r=>position(r,beforeCard)>=1)
+    assert.deepEqual(visibleFinishers.slice(0,4).map(r=>r.rank),[0,1,2,3])
+    assert.equal(original[2].finish,1)
+  }
+  assert.equal(scenarios.size,3)
 })
