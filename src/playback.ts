@@ -20,6 +20,21 @@ export const raceBeats = {
 
 export const finishShotAt=.84
 export type Beat = {index:number; at:number; runner:Runner}
+export type RaceEvent = {
+  index:number; kind:'obstacle'|'item'; variant:number; at:number; appears:number; ends:number
+  gate:number; lane:number; runnerId:string; strength:number; title:string
+}
+type Anchor = {time:number; distance:number}
+export type Runner = {
+  person:Person; lane:number; rank:number; finish:number; anchors:Anchor[]
+  affected:boolean; events?:RaceEvent[]
+}
+
+const eventTitles = {
+  swimming:{obstacle:['떠밀려 온 튜브','갑자기 밀려온 파도'],item:['물살 링 획득','급류 부스터 획득']},
+  cycling:{obstacle:['공사 콘 접촉','이동식 바리케이드'],item:['가속 패드 획득','골드 부스터 획득']},
+  running:{obstacle:['굴러온 응원공','쿠션 허들 착지'],item:['스퍼트 패드 획득','질주 부스터 획득']},
+}
 
 function noise(seed:number, id:string) {
   let value=seed
@@ -39,7 +54,8 @@ const packOffsets:Record<Sport,number[][]>={
 }
 const sportSalt:Record<Sport,number>={swimming:0,cycling:1511,running:3037}
 
-export function trackOrder(people:Person[],race:Race) {
+export function trackOrder(people:Person[],race:Race):Runner[] {
+  if(race.playbackVersion===1)return itemRaceOrder(people,race)
   const winners=new Map(race.winners.map((winner,rank)=>[winner.id,rank]))
   const seed=race.seed+sportSalt[race.sport]
   const seeded=people.map((person,lane)=>({person,lane, winner:winners.get(person.id),
@@ -128,15 +144,112 @@ export function trackOrder(people:Person[],race:Race) {
       affected:runner.crowd<.50}
   })
 }
-export type Runner=ReturnType<typeof trackOrder>[number]
+const simulationSteps=300
+const handoffStep=249
+
+export function eventForce(event:RaceEvent,time:number) {
+  const phase=(time-event.at)/(event.ends-event.at)
+  return phase>0&&phase<1?Math.sin(Math.PI*phase)**.75*event.strength:0
+}
+
+function itemRaceOrder(people:Person[],race:Race):Runner[] {
+  if(!people.length)return []
+  const seed=race.seed+sportSalt[race.sport]
+  const winners=new Map(race.winners.map((winner,rank)=>[winner.id,rank]))
+  const field=people.map((person,lane)=>({
+    person,lane,rank:0,finish:0,affected:false,events:[] as RaceEvent[],
+    anchors:[{time:0,distance:0}], distance:0, velocity:.94,leadSteps:0,
+    pace:noise(seed,person.id), phase:noise(seed,person.id+'pace')*Math.PI*2,
+  }))
+  const order=field.slice()
+  const paceBySport={swimming:.035,cycling:.049,running:.042}
+  const gaps=Array.from({length:6},(_,index)=>.07+noise(seed,'event-time'+index)*.065)
+  const eventSpan=.60+noise(seed,'event-span')*.028
+  const gapTotal=gaps.reduce((sum,gap)=>sum+gap,0)
+  const rounds=[.109+noise(seed,'first-event')*.047]
+  for(const gap of gaps)rounds.push(rounds.at(-1)!+eventSpan*gap/gapTotal)
+  const itemFirst=noise(seed,'item-first')<.5
+  const kinds=rounds.map((_,index)=>(index%2===0)===itemFirst?'item' as const:'obstacle' as const)
+  const swap=1+Math.floor(noise(seed,'item-order')*(rounds.length-3))
+  ;[kinds[swap],kinds[swap+1]]=[kinds[swap+1],kinds[swap]]
+  for(let step=1,eventIndex=0;step<=handoffStep;step++){
+    const time=(step-1)/simulationSteps
+    const leader=order[0].distance
+    const spread=Math.min(1,time/.16)*Math.min(1,(.94-time)/.18)
+    if(eventIndex<rounds.length&&time>=rounds[eventIndex]){
+      const kind=kinds[eventIndex]
+      const variant=Math.floor(noise(seed,'prop'+eventIndex)*2)
+      const chase=eventIndex%3===1
+      const from=kind==='obstacle'?0:chase?6:1
+      const width=kind==='obstacle'?3:chase?9:5
+      const options=order.slice(Math.min(from,order.length-1),from+width)
+      const clear=options.filter(target=>!order.some(other=>other.lane%15===target.lane%15
+        &&other.distance>target.distance&&other.distance-target.distance<.035))
+      const candidates=clear.length?clear:options
+      const leastInFront=Math.min(...candidates.map(candidate=>candidate.leadSteps))
+      const fresh=candidates.filter(candidate=>candidate.leadSteps===leastInFront)
+      const preferred=kind==='item'?fresh:candidates
+      const laneRoll=noise(seed,'lane'+eventIndex)
+      const target=kind==='obstacle'&&laneRoll<.68?preferred[0]:preferred[Math.floor(laneRoll*preferred.length)]
+      const ends=Math.min(handoffStep/simulationSteps,time+.057+noise(seed,'effect-length'+eventIndex)*.023)
+      const nearby=order[Math.min(order.length-1,order.indexOf(target)+3)]
+      const effectiveTime=(ends-time)*.61
+      const slowdown=Math.min(.70,Math.max(.145+variant*.035,(target.distance-nearby.distance)/effectiveTime+.105))
+      const boost=Math.min(.89,Math.max(.34,(leader-target.distance)/effectiveTime+(chase?.27:.22)))
+      target.events.push({index:eventIndex,kind,variant,at:time,
+        appears:time-(clear.length?.031:.014),ends,gate:target.distance,
+        lane:target.lane,runnerId:target.person.id,
+        strength:kind==='obstacle'?-slowdown:boost,title:eventTitles[race.sport][kind][variant]})
+      eventIndex++
+    }
+    for(const runner of field){
+      const gap=leader-runner.distance
+      const tempo=Math.sin(time*28+runner.phase)*paceBySport[race.sport]
+      const preferredGap=(1-runner.pace)**1.65*.055*spread
+      const draft=Math.min(.125,Math.max(0,gap-preferredGap-.008)*2.45)
+      const action=runner.events.reduce((sum,event)=>sum+eventForce(event,time),0)
+      const desired=.925+(runner.pace-.5)*.10+tempo+draft+action
+      runner.velocity+=(desired-runner.velocity)*.43
+      runner.distance+=runner.velocity/simulationSteps
+      if(step%3===0||step===handoffStep)runner.anchors.push({time:step/simulationSteps,distance:runner.distance})
+    }
+    order.sort((a,b)=>b.distance-a.distance||b.pace-a.pace||a.lane-b.lane)
+    order[0].leadSteps++
+  }
+  const finishOrder=[...order.filter(runner=>winners.has(runner.person.id))
+    .sort((a,b)=>winners.get(a.person.id)!-winners.get(b.person.id)!),
+    ...order.filter(runner=>!winners.has(runner.person.id))]
+  return finishOrder.map((runner,rank)=>{
+    const winner=winners.get(runner.person.id)
+    const finish=winner===undefined?1.023+(rank-winners.size)*.0024:.958+winner*.021
+    const {person,lane,anchors,events,distance,velocity}=runner
+    // Ease from the last simulated speed into a continuous run to the assigned finish.
+    const handoff=handoffStep/simulationSteps
+    const blend=.027
+    const closingSpeed=(1-distance-velocity*blend/2)/(finish-handoff-blend/2)
+    const next=distance+(velocity+closingSpeed)*blend/2
+    anchors.push({time:handoff+blend/2,distance:distance+(velocity*3+closingSpeed)*blend/8},
+      {time:handoff+blend,distance:next},{time:finish,distance:1})
+    return {person,lane,rank,finish,anchors,affected:false,events}
+  })
+}
+
+export function raceEvents(runners:Runner[]):RaceEvent[] {
+  return runners.flatMap(runner=>runner.events??[]).sort((a,b)=>a.index-b.index)
+}
 
 export function position(runner:Runner,time:number) {
   if(time<=0)return 0
   if(time>=runner.finish)return 1+(time-runner.finish)*.66
-  const i=runner.anchors.findIndex(anchor=>anchor.time>=time)
-  const a=runner.anchors[i-1], b=runner.anchors[i]
+  let low=1,high=runner.anchors.length-1
+  while(low<high){
+    const mid=(low+high)>>>1
+    if(runner.anchors[mid].time<time)low=mid+1
+    else high=mid
+  }
+  const a=runner.anchors[low-1], b=runner.anchors[low]
   const t=(time-a.time)/(b.time-a.time)
-  const blend=.72*t+.28*t*t*(3-2*t)
+  const blend=runner.events?t:.72*t+.28*t*t*(3-2*t)
   return a.distance+(b.distance-a.distance)*blend
 }
 

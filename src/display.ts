@@ -1,6 +1,6 @@
 import {api, ApiError, assetUrl, esc, loginPanel, operatorChannel, personPhoto, poll, type TvStatus, type ViewState} from './client.ts'
 import {audioSlots, countdownMs, currentRace, podiumIntervalMs, podiumRevealed, podiumStartAt, stage, type Person, type Race} from './model.ts'
-import {cuePoints, finishShotAt, position, raceBeats, trackOrder, type Beat, type Runner} from './playback.ts'
+import {cuePoints, finishShotAt, position, raceBeats, raceEvents, trackOrder, type Beat, type RaceEvent, type Runner} from './playback.ts'
 import {assignAvatarStyles, starterStyle, type AvatarStyle} from './avatar-style.ts'
 import countdownCard from './assets/countdown-mascot.webp'
 import podiumIntroCard from './assets/podium-intro.webp'
@@ -211,6 +211,7 @@ export function display(app:HTMLElement) {
     let startSequencePlayed=false
     let lastLeader=''
     let beats:Beat[]=[]
+    let events:RaceEvent[]=[]
     let playedBeat=-1
     let lastPass=0
     let runners:Runner[]=[]
@@ -218,6 +219,9 @@ export function display(app:HTMLElement) {
     let lastHud=0
     let lastRanking=0
     let ranking:Runner[]=[]
+    let previousPlaces=new Map<string,number>()
+    const rankMovement=new Map<string,{from:number;until:number}>()
+    let leaderUntil=0
     let rosterKey=''
     let avatarStyles=new Map<string,AvatarStyle>()
     const appearance=(person:Person)=>avatarStyles.get(person.id)??starterStyle
@@ -256,7 +260,8 @@ export function display(app:HTMLElement) {
         if(starter)list.unshift({id:'START',name:'사장님',team:'',photo:s.config.starter,active:true,color:'#f43a65'})
         const timeline:Race=race??{id:'ready',sport,seed:0,startsAt:0,endsAt:1,winners:[]}
         runners=trackOrder(list,timeline)
-        beats=podiumScene?[]:cuePoints(sport,runners)
+        events=race?.playbackVersion===1&&!podiumScene?raceEvents(runners):[]
+        beats=podiumScene||events.length?[]:cuePoints(sport,runners)
         const artwork=loaded.get(assetUrl(s,(podiumScene?s.config.podiumBackdrop:s.config.stadiumAd)??''))
         try {
           if(!graphicsLost&&track){
@@ -267,20 +272,22 @@ export function display(app:HTMLElement) {
         }
         catch{fallback('3D 경기장 구성 실패')}
         renderedRace=''
-        lastKey=key;needSetup=false;ranking=[]
+        lastKey=key;needSetup=false;ranking=[];previousPlaces.clear();rankMovement.clear();leaderUntil=0
       }
       const raceTime=p==='transition'?now:Math.min(now,race?.endsAt??now)
       const progress=race?Math.max(0,(raceTime-race.startsAt)/Math.max(1,race.endsAt-race.startsAt)):0
       const beat=beats.find(cue=>progress>=Math.max(0,cue.at-.045)&&progress<raceBeats[sport][cue.index].end)
+      const incident=p==='racing'?events.findLast(candidate=>progress>=candidate.appears&&progress<candidate.ends):undefined
+      const effect=p==='racing'?events.findLast(candidate=>progress>=candidate.at&&progress<candidate.ends):undefined
       const event=beat&&p==='racing'?raceBeats[sport][beat.index]:undefined
-      const shot=progress>=finishShotAt?'finish':beat?'event':progress>=.15?'leader':'wide'
+      const shot=progress>=finishShotAt?'finish':incident||beat?'event':progress>=.10?'leader':'wide'
       const ranked=runners.map(r=>({r,p:position(r,progress)})).sort((a,b)=>b.p-a.p||a.r.rank-b.r.rank)
       const revealed=p==='podium'&&race?podiumRevealed(race,now):0
       const podiumAge=revealed&&podiumAt!==undefined?(now-podiumAt-(revealed-1)*podiumIntervalMs)/1000:Infinity
       if(!graphicsLost&&p!=='complete'){
         try {
           track?.frame(progress,time/1000,podiumScene?'podium':shot,ranked.slice(0,6).map(x=>x.r),
-            starter,revealed,beat,podiumAge,ranked[Math.min(17,ranked.length-1)]?.p)
+            starter,revealed,beat,podiumAge,ranked[Math.min(17,ranked.length-1)]?.p,incident)
           if(track&&!podiumScene)renderedRace=race?.id??''
         }
         catch{fallback('3D 프레임 그리기 실패')}
@@ -304,14 +311,20 @@ export function display(app:HTMLElement) {
         playedBeat=beat.index
         if((progress-beat.at)*(race!.endsAt-race!.startsAt)<700)audio.play(event.sound,sport)
       }
+      if(effect&&effect.index>playedBeat){
+        playedBeat=effect.index
+        if((progress-effect.at)*(race!.endsAt-race!.startsAt)<550)audio.play(effect.kind,sport)
+      }
       const leader=ranked[0]?.r.person.id??''
-      if(p==='racing'&&!event&&shot!=='finish'&&lastLeader&&lastLeader!==leader&&now-lastPass>2800){lastPass=now;audio.play('pass')}
+      if(p==='racing'&&!event&&!incident&&shot!=='finish'&&lastLeader&&lastLeader!==leader&&now-lastPass>2000){lastPass=now;audio.play('pass')}
       lastLeader=leader
-      if(time-lastHud<90&&p!=='countdown'&&overlay.dataset.stage!=='countdown')return
+      if(time-lastHud<70&&p!=='countdown'&&overlay.dataset.stage!=='countdown')return
       lastHud=time
       overlay.dataset.stage=p
       overlay.dataset.sport=sport
-      overlay.dataset.beat=beat&&p==='racing'?String(beat.index):''
+      overlay.dataset.beat=incident?String(incident.index):beat&&p==='racing'?String(beat.index):''
+      overlay.dataset.eventKind=incident?.kind??''
+      overlay.dataset.eventPhase=incident?(progress<incident.at?'approach':'effect'):''
       overlay.parentElement!.dataset.sport=sport
       overlay.dataset.revision=String(s.revision)
       overlay.dataset.graphics=tv.graphics
@@ -334,18 +347,44 @@ export function display(app:HTMLElement) {
           if(count!==countdownPlayed&&audio.usesSeparateStartCues()&&audio.play('countdown',undefined,count))countdownPlayed=count
         }else setMarkup('')
       }else if(p==='racing'){
-        if(!ranking.length||time-lastRanking>=600){ranking=ranked.slice(0,10).map(({r})=>r);lastRanking=time}
+        if(!ranking.length||time-lastRanking>=145){
+          const next=ranked.slice(0,10).map(({r})=>r)
+          if(progress>.035&&ranking.length){
+            if(next[0]&&next[0]!==ranking[0])leaderUntil=time+1000
+            next.forEach(({person},index)=>{
+              const place=index+1
+              const prior=previousPlaces.get(person.id)??place
+              const recent=rankMovement.get(person.id)
+              if(prior!==place){
+                const from=recent&&time<recent.until?recent.from:prior
+                rankMovement.set(person.id,{from,until:time+850})
+              }
+            })
+          }
+          ranking=next;lastRanking=time
+          previousPlaces=new Map(ranked.map(({r},i)=>[r.person.id,i+1]))
+        }
         const savedCaption=s.config.captions[sport]
-        const caption=beat?.index===1&&!(sport==='cycling'&&savedCaption==='급커브! 선두권 대혼전')?savedCaption||event?.title:event?.title
+        const customCaption=savedCaption&&savedCaption!==raceBeats[sport][1].title&&savedCaption!=='급커브! 선두권 대혼전'
+        const featured=effect?runners.find(runner=>runner.person.id===effect.runnerId):undefined
+        const caption=featured&&effect
+          ?featured.person.name+' · '+(effect.kind==='obstacle'&&customCaption?savedCaption:effect.title)
+          :beat?.index===1&&customCaption?savedCaption:event?.title
         setMarkup('<div class="leaderboard"><ul role="list" aria-label="경기 순위">'+ranking.map(({person},index)=>{
             const photo=loaded.get(personPhoto(s,person))
             const place=index+1
             const medal=place<=3?'<span class="runner-medal" data-place="'+place+'" role="img" aria-label="'+place+'위"><span>'+place+'</span></span>':''
-            return '<li>'+(photo?.naturalWidth?'<img src="'+esc(photo.src)+'" alt="">':
+            const recent=rankMovement.get(person.id)
+            const delta=recent&&time<recent.until?recent.from-place:0
+            const showingDelta=Math.abs(delta)>=(place<=3?1:2)
+            const highlight=index===0&&time<leaderUntil?' class="lead-change"':''
+            const eventLabel=effect?.runnerId===person.id?' data-event="'+effect.kind+'"':''
+            return '<li'+highlight+eventLabel+'>'+(photo?.naturalWidth?'<img src="'+esc(photo.src)+'" alt="">':
               '<span class="runner-avatar" style="background-color:'+appearance(person).primary+'" aria-hidden="true"></span>')+
-              '<span class="runner-name">'+medal+esc(person.name)+'</span></li>'
+              '<span class="runner-name">'+medal+esc(person.name)+'</span>'+
+              (showingDelta?'<span class="rank-delta '+(delta>0?'rank-up':'rank-down')+'" aria-label="'+Math.abs(delta)+'계단 '+(delta>0?'상승':'하락')+'">'+(delta>0?'▲':'▼')+Math.abs(delta)+'</span>':'')+'</li>'
           }).join('')+'</ul></div>'+
-          (caption?'<div class="ticker">'+esc(caption)+'</div>':''))
+          (caption?'<div class="ticker"'+(effect?' data-event="'+effect.kind+'"':'')+'>'+esc(caption)+'</div>':''))
       }else if(p==='transition'){
         setMarkup('<div class="podium-intro"><div class="podium-intro-card"><img src="'+esc(podiumIntroCard)+'" alt="Finish"></div></div>')
       }else if(p==='podium'&&race){

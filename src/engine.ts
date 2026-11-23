@@ -49,7 +49,10 @@ export function apply(previous:State, action:Action, now:number, pick:(max:numbe
       const attempt:Race={id:randomUUID(),sport,seed:pick(2**31),startsAt,createdAt:now,redrawId:s.ready.redrawId,eligibleCount,
         endsAt:emergency ? now : startsAt+s.config.duration[sport]*1000,winners}
       if (emergency) attempt.podiumAt=now+podiumLeadMs
-      else attempt.transitionMs=podiumTransitionMs
+      else {
+        attempt.transitionMs=podiumTransitionMs
+        attempt.playbackVersion=1
+      }
       s.races.push(attempt)
       s.current=attempt.id
       s.locked=true

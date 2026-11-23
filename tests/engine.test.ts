@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {apply} from '../src/engine.ts'
 import {initial,sports,csv,currentRace,stage,findAsset,podiumStartAt,podiumReadyAt,podiumRevealed,podiumIntervalMs,type State,type Sport} from '../src/model.ts'
-import {cuePoints,position,raceBeats,trackOrder} from '../src/playback.ts'
+import {cuePoints,position,raceBeats,raceEvents,trackOrder,type Runner} from '../src/playback.ts'
 import {fixture} from './fixture.ts'
 const base=100000
 function finish(s:State,sport:Sport,now:number) {
@@ -121,7 +121,7 @@ test('direct preparation uses stable IDs and rejects edits after drawing',()=>{
   assert.throws(()=>apply(state,{type:'prizeNames',names:{swimming:'A',cycling:'B',running:'C'}},base))
 })
 
-test('three course stories change leaders and keep a deterministic photo finish',()=>{
+test('saved races still replay their original course checkpoints and finish',()=>{
   for(const sport of sports)for(const duration of [15,40,120])for(const seed of [0,17,42,91827,2147483647]){
     let state=fixture()
     const config=structuredClone(state.config)
@@ -129,7 +129,8 @@ test('three course stories change leaders and keep a deterministic photo finish'
     state=apply(state,{type:'config',config},base)
     for(const prior of sports.slice(0,sports.indexOf(sport))) state=finish(state,prior,base-30000)
     const ready=state.ready?state:apply(state,{type:'prepare',sport},base)
-    const race=currentRace(apply(ready,{type:'start'},base,max=>max===2**31?seed:Math.floor(max/3)))!
+    const race={...currentRace(apply(ready,{type:'start'},base,max=>max===2**31?seed:Math.floor(max/3)))!}
+    delete race.playbackVersion
     const runners=trackOrder(state.people,race)
     assert.equal(race.endsAt-race.startsAt,duration*1000)
     const byPosition=(t:number)=>runners.slice().sort((a,b)=>position(b,t)-position(a,t))
@@ -167,5 +168,52 @@ test('three course stories change leaders and keep a deterministic photo finish'
       assert.deepEqual(runners.filter(r=>position(r,t)>=1).map(r=>r.person.id),
         race.winners.slice(0,i+1).map(w=>w.id))
     }
+  }
+})
+
+test('item races replay seven lane events, change pace and still finish in draw order',()=>{
+  const seeds=[0,17,42,91827,2147483647]
+  const fixtureState=fixture()
+  for(const sport of sports){
+    const firstEventTimes=new Set<number>()
+    let applied=0,total=0
+    for(const count of [9,90])for(const seed of seeds){
+      let ready={...fixtureState,people:fixtureState.people.slice(0,count)}
+      for(const prior of sports.slice(0,sports.indexOf(sport)))ready=finish(ready,prior,base-30000)
+      if(!ready.ready)ready=apply(ready,{type:'prepare',sport},base)
+      const state=apply(ready,{type:'start'},base,max=>max===2**31?seed:0)
+      const race=currentRace(state)!
+      assert.equal(race.playbackVersion,1)
+      const runners=trackOrder(state.people,race)
+      assert.deepEqual(trackOrder(state.people,structuredClone(race)),runners)
+      const events=raceEvents(runners)
+      assert.equal(events.length,7)
+      firstEventTimes.add(events[0].at)
+      assert.ok(events[0].appears<.15&&events.at(-1)!.ends>.75)
+      assert.ok([3,4].includes(events.filter(event=>event.kind==='item').length))
+      const rankAt=(target:Runner,time:number)=>1+runners.filter(r=>position(r,time)>position(target,time)).length
+      for(const [index,event] of events.entries()){
+        const target=runners.find(r=>r.person.id===event.runnerId)!
+        assert.equal(target.lane,event.lane)
+        assert.ok(Math.abs(position(target,event.at)-event.gate)<.001)
+        assert.ok(event.appears<event.at&&event.at<event.ends)
+        if(index)assert.ok(event.at>events[index-1].at)
+        const mid=(event.at+event.ends)/2
+        const speed=position(target,mid+.005)-position(target,mid)
+        const approach=position(target,event.at)-position(target,event.at-.005)
+        assert.ok(event.kind==='item'?speed>approach:speed<approach)
+        if(count===90){
+          const before=rankAt(target,event.at),after=rankAt(target,event.ends)
+          applied+=Number(event.kind==='item'?after<before:after>before)
+          total++
+        }
+      }
+      for(const runner of runners){
+        assert.ok(runner.anchors.every((a,index,all)=>index===0||a.distance>all[index-1].distance))
+      }
+      assert.deepEqual(runners.filter(r=>position(r,1)>=1).map(r=>r.person.id),race.winners.map(w=>w.id))
+    }
+    assert.ok(firstEventTimes.size>1)
+    assert.ok(applied/total>.85)
   }
 })

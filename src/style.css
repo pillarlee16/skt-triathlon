@@ -766,6 +766,21 @@ input:not([type=checkbox]),select { background: #fffdfa; }
     radial-gradient(ellipse at 50% 111%,#fff9e9 0 44%,transparent 46%);
 }
 .runner-name { min-width: 0; overflow-wrap: anywhere; line-height: 1.13; }
+.leaderboard li.lead-change {
+  background: #fff2bd;
+  box-shadow: inset .17em 0 #d79418;
+  border-radius: .22em;
+}
+.rank-delta {
+  flex: 0 0 auto; margin-inline-start: auto; padding: .10em .33em;
+  font-size: .68em; font-weight: 900; font-variant-numeric: tabular-nums; border-radius: .35em;
+}
+.rank-up { color: #125c47; background: #d5f4e6; }
+.rank-down { color: #922a43; background: #fce1e7; }
+.leaderboard [data-event="item"] .runner-name { color: #125c47; }
+.leaderboard [data-event="obstacle"] .runner-name { color: #842d41; }
+.ticker[data-event="item"] { background: #d0f9ea; color: #16483f; }
+.ticker[data-event="obstacle"] { background: #ffe6ae; color: #663322; }
 .runner-medal {
   position: relative; display: inline-grid; place-items: end center;
   width: 1.45em; height: 2em; margin-inline-end: .35em;
